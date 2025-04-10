@@ -1,3 +1,5 @@
+# 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
+
 name: Build and Push Docker image
 
 on:
@@ -18,7 +20,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Build Docker image
         run: docker build -t ghcr.io/tiagofonseca/opeva_backend_api_training:latest .
