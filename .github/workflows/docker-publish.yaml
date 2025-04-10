@@ -1,4 +1,3 @@
-
 name: Build and Push Docker image
 
 on:
@@ -21,7 +20,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build Docker image
-        run: docker build -t tiagofonseca/opeva_backend_api_training:latest .
+        run: docker build -t calof/opeva_backend_api_training:latest .
 
       - name: Push Docker image
-        run: docker push tiagofonseca/opeva_backend_api_training:latest
+        run: docker push calof/opeva_backend_api_training:latest
