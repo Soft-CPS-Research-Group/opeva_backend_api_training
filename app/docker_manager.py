@@ -1,45 +1,49 @@
 import docker
 import os
-from app.config import CONTAINER_SHARED_DATA
-from app.utils import collect_results, read_progress
+from app.config import VM_SHARED_DATA
+from app.models import SimulationRequest
 
-client = docker.from_env()
+def get_docker_client(target_host: str):
+    if target_host == "local":
+        return docker.from_env()
+    else:
+        try:
+            client = docker.DockerClient(base_url=f"ssh://{target_host}")
+            # Try listing containers to test the connection
+            client.containers.list()
+            return client
+        except Exception as e:
+            raise RuntimeError(f"Could not reach Docker daemon on '{target_host}': {e}")
 
-def run_simulation(job_id, request):
-    try:
-        volumes = {
-            "/opt/opeva_shared_data": {"bind": "/data", "mode": "rw"}
-        }
-        environment = {
-            "PARAM1": request.param1,
-            "PARAM2": request.param2,
-            "MLFLOW_TRACKING_URI": "http://mlflow:5000"
-        }
-        command = f"python wrapper.py --config /data/configs/{request.config_file} --job_id {job_id}"
+def run_simulation(job_id, request: SimulationRequest, target_host: str):
+    shared_host = VM_SHARED_DATA
+    shared_container = "/data"
 
-        container = client.containers.run(
-            image="your-simulation-image:latest",
-            command=command,
-            volumes=volumes,
-            environment=environment,
-            detach=True,
-            stdout=True,
-            stderr=True
-        )
+    volumes = {
+        shared_host: {"bind": shared_container, "mode": "rw"}
+    }
 
-        # Immediately stream logs to file
-        log_file_path = f"/opt/opeva_shared_data/logs/{job_id}.log"
-        with open(log_file_path, "wb") as f:
-            for log in container.logs(stream=True):
-                f.write(log)
+    command = (
+        f"python wrapper.py "
+        f"--config /data/{request.config_path} "
+        f"--job_id {job_id}"
+    )
 
-        return container
-    except Exception as e:
-        raise RuntimeError(f"Error launching simulation: {e}")
+    docker_client = get_docker_client(target_host)
+    container = docker_client.containers.run(
+        image="your-simulation-image:latest",
+        command=command,
+        volumes=volumes,
+        detach=True,
+        stdout=True,
+        stderr=True
+    )
+
+    return container
 
 def get_container_status(container_id):
     try:
-        container = client.containers.get(container_id)
+        container = docker.from_env().containers.get(container_id)
         container.reload()
         return container.status
     except docker.errors.NotFound:
@@ -49,22 +53,25 @@ def get_container_status(container_id):
 
 def stop_container(container_id):
     try:
-        container = client.containers.get(container_id)
+        container = docker.from_env().containers.get(container_id)
         container.stop()
         return "stopped"
     except Exception as e:
         return f"error: {str(e)}"
 
-def get_simulation_result(job_id):
-    return collect_results(job_id)
-
-def get_simulation_progress(job_id):
-    return read_progress(job_id)
-
 def stream_container_logs(container_id):
     try:
-        container = client.containers.get(container_id)
-        for log in container.logs(stream=True, follow=True):
-            yield log.decode('utf-8')
+        log_path = os.path.join("/opt/opeva_shared_data", "jobs")
+        for job_id, cid in jobs.items():
+            if cid == container_id:
+                path = os.path.join(log_path, job_id, "logs", f"{job_id}.log")
+                if os.path.exists(path):
+                    with open(path) as f:
+                        for line in f:
+                            yield line
+                else:
+                    yield f"Log file not found for job_id {job_id}"
+                return
+        yield f"Job not found for container ID: {container_id}"
     except Exception as e:
-        yield f"Error streaming logs: {e}"
+        yield f"Error reading logs: {e}"

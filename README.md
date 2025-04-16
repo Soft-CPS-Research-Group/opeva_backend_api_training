@@ -53,11 +53,11 @@ networks:
 
 It uses the shared /opt/opeva_shared_data/ folder to store:
 
-- Logs: /logs/{job_id}.log
-
-- Results: /results/{job_id}/result.json
-
-- Progress: /progress/{job_id}/progress.json
+- All outputs (logs, results, progress, metadata) are stored under `/jobs/{job_id}/`, including:
+  - `logs/{job_id}.log`
+  - `results/result.json`
+  - `progress/progress.json`
+  - `job_info.json`
 
 ## Getting Started
 #### Requirements
@@ -98,6 +98,7 @@ The backend provides the following endpoints:
 | GET	| /logs/{job_id}	| Stream container logs (static file read)
 | POST	| /stop/{job_id}| 	Stop a running container/job
 | GET	| /jobs	List all|  tracked jobs
+| GET	| /job-info/{job_id} | Get metadata about a job
 | GET	| /health | 	Health check of the API
 
 
@@ -154,3 +155,14 @@ Fork this repo, clone it, and work on a branch.
 
 ## Support
 If you need help deploying or integrating with this API, reach out to Tiago Fonseca.
+
+---
+
+## 🧠 Simulation Logging (Updated)
+
+Simulation containers now handle their own logging internally and save logs directly to:
+```
+/opt/opeva_shared_data/jobs/{job_id}/logs/{job_id}.log
+```
+The backend no longer captures stdout/stderr logs directly. It simply streams from the file if needed.
+

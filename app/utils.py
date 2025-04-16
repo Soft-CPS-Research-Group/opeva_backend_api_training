@@ -1,11 +1,12 @@
 import json
 import os
-from app.config import JOB_TRACK_FILE, RESULTS_DIR, PROGRESS_DIR, CONFIGS_DIR
+import yaml
+from uuid import uuid4
+from app.config import CONFIGS_DIR, JOB_TRACK_FILE, JOBS_DIR
 
 def ensure_directories():
-    for path in [RESULTS_DIR, PROGRESS_DIR, CONFIGS_DIR]:
-        os.makedirs(path, exist_ok=True)
-    # Initialize job track file if it doesn't exist
+    os.makedirs(CONFIGS_DIR, exist_ok=True)
+    os.makedirs(JOBS_DIR, exist_ok=True)
     if not os.path.exists(JOB_TRACK_FILE):
         with open(JOB_TRACK_FILE, "w") as f:
             json.dump({}, f)
@@ -23,7 +24,7 @@ def load_jobs():
     return {}
 
 def collect_results(job_id):
-    result_path = os.path.join(RESULTS_DIR, job_id, "result.json")
+    result_path = os.path.join(JOBS_DIR, job_id, "results", "result.json")
     if os.path.exists(result_path):
         with open(result_path) as f:
             return json.load(f)
@@ -31,9 +32,31 @@ def collect_results(job_id):
         return {"status": "pending", "message": "Result not ready yet."}
 
 def read_progress(job_id):
-    progress_path = os.path.join(PROGRESS_DIR, job_id, "progress.json")
+    progress_path = os.path.join(JOBS_DIR, job_id, "progress", "progress.json")
     if os.path.exists(progress_path):
         with open(progress_path) as f:
             return json.load(f)
     else:
         return {"progress": "No updates yet."}
+
+def save_config_dict(config: dict, file_name: str) -> str:
+    full_path = os.path.join(CONFIGS_DIR, file_name)
+    with open(full_path, "w") as f:
+        yaml.dump(config, f)
+    return f"configs/{file_name}"
+
+def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str, container_id: str):
+    import datetime, json
+    job_dir = os.path.join(JOBS_DIR, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    info_path = os.path.join(job_dir, "job_info.json")
+    info = {
+        "job_id": job_id,
+        "job_name": job_name,
+        "config_path": config_path,
+        "target_host": target_host,
+        "container_id": container_id,
+        "started_at": datetime.datetime.utcnow().isoformat() + "Z"
+    }
+    with open(info_path, "w") as f:
+        json.dump(info, f, indent=2)
