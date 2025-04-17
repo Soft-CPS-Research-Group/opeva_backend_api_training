@@ -45,7 +45,8 @@ def save_config_dict(config: dict, file_name: str) -> str:
         yaml.dump(config, f)
     return f"configs/{file_name}"
 
-def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str, container_id: str):
+def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str, container_id: str, experiment_name: str = None, run_name: str = None):
+
     import datetime, json
     job_dir = os.path.join(JOBS_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
@@ -56,7 +57,9 @@ def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str
         "config_path": config_path,
         "target_host": target_host,
         "container_id": container_id,
-        "started_at": datetime.datetime.utcnow().isoformat() + "Z"
+        "started_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "experiment_name": experiment_name,
+        "run_name": run_name,
     }
     with open(info_path, "w") as f:
         json.dump(info, f, indent=2)

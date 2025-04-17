@@ -35,8 +35,22 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
         )
 
         container = run_simulation(job_id, sim_request, request.target_host)
+
         save_job(job_id, container.id)
-        save_job_info(job_id, job_id, config_path, request.target_host, container.id)
+
+        experiment_name = config.get("experiment", {}).get("name")
+        run_name = config.get("experiment", {}).get("run_name")
+
+        save_job_info(
+            job_id=job_id,
+            job_name=job_id,
+            config_path=config_path,
+            target_host=request.target_host,
+            container_id=container.id,
+            experiment_name=experiment_name,
+            run_name=run_name
+        )
+
         jobs[job_id] = container.id
 
         return {
