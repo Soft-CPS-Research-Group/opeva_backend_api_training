@@ -31,9 +31,16 @@ def run_simulation(job_id, request: SimulationRequest, target_host: str):
         f"--job_id {job_id}"
     )
 
+    print("FFFF - 5")
+
     docker_client = get_docker_client(target_host)
+
+    print("DEBUG: docker_client =", docker_client)
+    print("DEBUG: docker_client.containers =", docker_client.containers)
+    print("DEBUG: type(docker_client.containers) =", type(docker_client.containers))
+
     container = docker_client.containers.run(
-        image="your-simulation-image:latest",
+        image="calof/opeva_simulator:latest",
         command=command,
         volumes=volumes,
         detach=True,
