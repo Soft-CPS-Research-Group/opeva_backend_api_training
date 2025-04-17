@@ -7,8 +7,13 @@ from app.utils import load_jobs  # <-- required for log streaming
 jobs = load_jobs()
 
 def get_docker_client(target_host: str):
+    print("target_host =", target_host)
     if target_host == "local":
-        return docker.from_env()
+        print("💡 USING LOCAL DOCKER")
+        print("DOCKER_HOST =", os.getenv("DOCKER_HOST"))
+        client = docker.from_env()
+        print("client.api.base_url =", client.api.base_url)
+        return client
     else:
         try:
             client = docker.DockerClient(base_url=f"ssh://{target_host}")
