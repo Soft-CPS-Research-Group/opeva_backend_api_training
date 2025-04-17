@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models import JobLaunchRequest, SimulationRequest
+from app.config import CONFIGS_DIR
 from app.utils import ensure_directories, save_job, save_job_info, load_jobs, save_config_dict, collect_results, read_progress
 from app.docker_manager import run_simulation, get_container_status, stop_container, stream_container_logs
 import os
@@ -15,19 +16,17 @@ ensure_directories()
 @app.post("/run-simulation")
 async def run_simulation_from_ui(request: JobLaunchRequest):
     try:
+        job_id = str(uuid4())
         if request.config_path:
             config_path = request.config_path
-            with open(os.path.join("/opt/opeva_shared_data", config_path)) as f:
+            with open(os.path.join(CONFIGS_DIR, config_path)) as f:
                 config = yaml.safe_load(f)
         elif request.config:
-            job_id = str(uuid4())
             file_name = request.save_as or f"{job_id}.yaml"
             config_path = save_config_dict(request.config, file_name)
             config = request.config
         else:
             raise HTTPException(status_code=400, detail="Missing config or config_path")
-
-        job_id = str(uuid4())
 
         sim_request = SimulationRequest(
             config_path=config_path,

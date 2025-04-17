@@ -102,12 +102,6 @@ The backend provides the following endpoints:
 | GET	| /health | 	Health check of the API
 
 
-**Example Request: Run Simulation**
-
-```
-curl -X POST "http://<VM-IP>:8000/run-simulation" -H "Content-Type: application/json" -d '{"param1": "value1", "param2": "value2", "config_file": "config.yml"}'
-```
-
 ## CI/CD Pipeline
 This repository uses GitHub Actions to build and publish Docker images to GitHub Container Registry.
 
@@ -165,4 +159,237 @@ Simulation containers now handle their own logging internally and save logs dire
 /opt/opeva_shared_data/jobs/{job_id}/logs/{job_id}.log
 ```
 The backend no longer captures stdout/stderr logs directly. It simply streams from the file if needed.
+
+
+## 📁 Output Paths (in /opt/opeva_shared_data)
+
+```
+jobs/{job_id}/
+├── logs/
+│   └── {job_id}.log             ← full log file
+├── progress/
+│   └── progress.json            ← updated by training loop
+├── results/
+│   └── result.json              ← final KPIs written here
+├── job_info.json                ← metadata saved at start
+```
+
+---
+
+## 🛑 Best Practices & Gotchas
+
+✅ **Always verify that `config_path` exists** under `/opt/opeva_shared_data/configs/`  
+✅ Use **inline config** for dynamic jobs or UI input  
+✅ Make sure dataset paths in config point to `/data/...` (inside container)  
+✅ Always mount `/opt/opeva_shared_data` into `/data` in any container  
+
+❌ Do **not** point to `./datasets/...` or `./logs/...` in your config (won't exist inside the container)  
+❌ Do **not** rely on container logs — use log files saved to shared data
+
+---
+
+
+
+## 📡 Full API Endpoint Examples
+
+### ✅ Launch a Simulation (existing config)
+
+```bash
+curl -X POST http://<IP>:8000/run-simulation \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config_path": "configs/my_config.yaml",
+    "target_host": "local"
+}'
+```
+
+### ✅ Launch a Simulation (inline config)
+
+```bash
+curl -X POST http://<IP>:8000/run-simulation \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "experiment": {
+        "name": "my_experiment",
+        "run_name": "test-run-01",
+        "logging": {
+          "mlflow": true,
+          "mlflow_uri": "http://mlflow:5000",
+          "log_level": "INFO"
+        }
+      },
+      "simulator": {
+        "dataset_path": "/data/datasets/schema.json",
+        "central_agent": false,
+        "reward_function": "RewardFunction"
+      },
+      "algorithm": {
+        "seed": 22,
+        "hyperparameters": {
+          "checkpoint_interval": 50,
+          "steps_between_training_updates": 5,
+          "target_update_interval": 10,
+          "end_exploration_time_step": 200,
+          "end_initial_exploration_time_step": 100
+        }
+      }
+    },
+    "save_as": "generated_config.yaml",
+    "target_host": "local"
+}'
+```
+
+### 🔍 Check Job Status
+
+**GET** `/status/{job_id}`
+
+```bash
+curl http://<IP>:8000/status/abc123
+```
+
+Response:
+```json
+{
+  "job_id": "abc123",
+  "status": "running"
+}
+```
+
+---
+
+### 📊 Get Simulation Results
+
+**GET** `/result/{job_id}`
+
+```bash
+curl http://<IP>:8000/result/abc123
+```
+
+Response:
+```json
+{
+  "EnergyCost": 12.45,
+  "Emissions": 3.7,
+  ...
+}
+```
+
+---
+
+### 📈 Get Training Progress
+
+**GET** `/progress/{job_id}`
+
+```bash
+curl http://<IP>:8000/progress/abc123
+```
+
+Response:
+```json
+{
+  "progress": {
+    "step": 1500,
+    "reward": [0.3, 0.7],
+    ...
+  }
+}
+```
+
+---
+
+### 📄 Stream Simulation Logs
+
+**GET** `/logs/{job_id}`
+
+```bash
+curl http://<IP>:8000/logs/abc123
+```
+
+Response:
+```
+[2024-04-17 12:00:01] - INFO - Starting simulation...
+[2024-04-17 12:00:05] - INFO - Training step 1 complete.
+...
+```
+
+---
+
+### ⛔ Stop a Running Job
+
+**POST** `/stop/{job_id}`
+
+```bash
+curl -X POST http://<IP>:8000/stop/abc123
+```
+
+Response:
+```json
+{
+  "message": "stopped"
+}
+```
+
+---
+
+### 📋 List All Tracked Jobs
+
+**GET** `/jobs`
+
+```bash
+curl http://<IP>:8000/jobs
+```
+
+Response:
+```json
+[
+  {
+    "job_id": "abc123",
+    "status": "exited",
+    "job_info": { "experiment_name": "test-run" }
+  },
+  ...
+]
+```
+
+---
+
+### 🧾 Get Job Metadata
+
+**GET** `/job-info/{job_id}`
+
+```bash
+curl http://<IP>:8000/job-info/abc123
+```
+
+Response:
+```json
+{
+  "job_id": "abc123",
+  "job_name": "abc123",
+  "config_path": "configs/example.yaml",
+  "target_host": "local",
+  "started_at": "2024-04-17T12:00:00Z",
+  ...
+}
+```
+
+---
+
+### 🩺 Health Check
+
+**GET** `/health`
+
+```bash
+curl http://<IP>:8000/health
+```
+
+Response:
+```json
+{
+  "status": "ok"
+}
+```
+
+---
 
