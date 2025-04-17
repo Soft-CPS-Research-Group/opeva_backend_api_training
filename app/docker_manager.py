@@ -2,6 +2,9 @@ import docker
 import os
 from app.config import VM_SHARED_DATA
 from app.models import SimulationRequest
+from app.utils import load_jobs  # <-- required for log streaming
+
+jobs = load_jobs()
 
 def get_docker_client(target_host: str):
     if target_host == "local":
@@ -9,7 +12,6 @@ def get_docker_client(target_host: str):
     else:
         try:
             client = docker.DockerClient(base_url=f"ssh://{target_host}")
-            # Try listing containers to test the connection
             client.containers.list()
             return client
         except Exception as e:
@@ -61,7 +63,7 @@ def stop_container(container_id):
 
 def stream_container_logs(container_id):
     try:
-        log_path = os.path.join("/opt/opeva_shared_data", "jobs")
+        log_path = os.path.join(VM_SHARED_DATA, "jobs")
         for job_id, cid in jobs.items():
             if cid == container_id:
                 path = os.path.join(log_path, job_id, "logs", f"{job_id}.log")

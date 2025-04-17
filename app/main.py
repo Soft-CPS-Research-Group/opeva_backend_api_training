@@ -8,6 +8,7 @@ import os
 import json
 import yaml
 from uuid import uuid4
+import traceback
 
 app = FastAPI()
 jobs = load_jobs()
@@ -16,29 +17,42 @@ ensure_directories()
 @app.post("/run-simulation")
 async def run_simulation_from_ui(request: JobLaunchRequest):
     try:
+        print("AAAA")
         job_id = str(uuid4())
         if request.config_path:
             config_path = request.config_path
             with open(os.path.join(CONFIGS_DIR, config_path)) as f:
                 config = yaml.safe_load(f)
         elif request.config:
+            print("BBBB")
             file_name = request.save_as or f"{job_id}.yaml"
+            print("CCCCC")
             config_path = save_config_dict(request.config, file_name)
+            print("DDDD")
             config = request.config
         else:
             raise HTTPException(status_code=400, detail="Missing config or config_path")
 
+        print("EEEE")
         sim_request = SimulationRequest(
             config_path=config_path,
             job_name=job_id
         )
 
+        print("FFFF")
+
         container = run_simulation(job_id, sim_request, request.target_host)
+
+        print("GGGG")
 
         save_job(job_id, container.id)
 
+        print("HHHH")
+
         experiment_name = config.get("experiment", {}).get("name")
         run_name = config.get("experiment", {}).get("run_name")
+
+        print("IIII")
 
         save_job_info(
             job_id=job_id,
@@ -60,6 +74,9 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
             "job_name": job_id
         }
     except Exception as e:
+        print("\n\n--- Exception Traceback ---")
+        print(traceback.format_exc())
+        print("---------------------------\n")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/status/{job_id}")

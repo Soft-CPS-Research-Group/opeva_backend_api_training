@@ -40,9 +40,14 @@ def read_progress(job_id):
         return {"progress": "No updates yet."}
 
 def save_config_dict(config: dict, file_name: str) -> str:
+    print("CCCCC - 1")
     full_path = os.path.join(CONFIGS_DIR, file_name)
+    print("CCCCC - 2")
+
     with open(full_path, "w") as f:
         yaml.dump(config, f)
+    print("CCCCC - 3")
+    
     return f"configs/{file_name}"
 
 def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str, container_id: str, experiment_name: str = None, run_name: str = None):
