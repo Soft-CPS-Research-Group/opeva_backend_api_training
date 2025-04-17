@@ -41,6 +41,9 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
 
         print("FFFF")
 
+        print("DEBUG: run_simulation =", run_simulation)
+        print("DEBUG: type(run_simulation) =", type(run_simulation))
+
         container = run_simulation(job_id, sim_request, request.target_host)
 
         print("GGGG")
