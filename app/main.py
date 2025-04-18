@@ -10,6 +10,7 @@ import yaml
 from uuid import uuid4
 from fastapi import Body
 import base64
+import re
 
 app = FastAPI()
 jobs = load_jobs()
@@ -32,7 +33,8 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
 
         experiment_name = config.get("experiment", {}).get("name")
         run_name = config.get("experiment", {}).get("run_name")
-        job_name=experiment_name + " - " + run_name
+        job_name=re.sub(r'[^a-zA-Z0-9_.-]', '_', experiment_name + " - " + run_name)
+
 
         sim_request = SimulationRequest(
             config_path=config_path,
