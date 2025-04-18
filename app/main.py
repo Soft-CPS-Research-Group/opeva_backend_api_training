@@ -1,16 +1,20 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import StreamingResponse
 from app.models import JobLaunchRequest, SimulationRequest
 from app.config import CONFIGS_DIR
-from app.utils import delete_job_by_id, delete_config_by_name, ensure_directories, save_job, save_job_info, load_jobs, save_config_dict, collect_results, read_progress, save_config_file,list_config_files,load_config_file,create_dataset_dir,list_available_datasets
+from app.utils import (
+    delete_job_by_id, delete_config_by_name, ensure_directories, save_job,
+    save_job_info, load_jobs, save_config_dict, collect_results, read_progress,
+    save_config_file, list_config_files, load_config_file, create_dataset_dir,
+    list_available_datasets
+)
 from app.docker_manager import run_simulation, get_container_status, stop_container, stream_container_logs
 import os
 import json
 import yaml
-from uuid import uuid4
-from fastapi import Body
-import base64
 import re
+import traceback
+from uuid import uuid4
 
 app = FastAPI()
 jobs = load_jobs()
@@ -31,11 +35,10 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
         else:
             raise HTTPException(status_code=400, detail="Missing config or config_path")
 
-        experiment_name = config.get("experiment", {}).get("name")
-        run_name = config.get("experiment", {}).get("run_name")
-        job_name=re.sub(r'[^a-zA-Z0-9_.-]', '_', experiment_name + " - " + run_name)
+        experiment_name = config.get("experiment", {}).get("name", "UnnamedExperiment")
+        run_name = config.get("experiment", {}).get("run_name", "UnnamedRun")
+        job_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', f"{experiment_name}-{run_name}")
 
-        # Ensure path is under configs/ if not already
         if not config_path.startswith("configs/"):
             config_path = f"configs/{config_path}"
 
@@ -46,8 +49,17 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
 
         container = run_simulation(job_id, sim_request, request.target_host)
 
-        save_job(job_id, container.id)        
+        job_metadata = {
+            "container_id": container.id,
+            "container_name": container.name,
+            "job_name": job_name,
+            "config_path": config_path,
+            "target_host": request.target_host,
+            "experiment_name": experiment_name,
+            "run_name": run_name,
+        }
 
+        save_job(job_id, job_metadata)
         save_job_info(
             job_id=job_id,
             job_name=job_name,
@@ -59,7 +71,7 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
             run_name=run_name
         )
 
-        jobs[job_id] = container.id
+        jobs[job_id] = job_metadata
 
         return {
             "job_id": job_id,
@@ -76,9 +88,10 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
 
 @app.get("/status/{job_id}")
 async def check_status(job_id: str):
-    container_id = jobs.get(job_id)
-    if not container_id:
+    job = jobs.get(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    container_id = job.get("container_id")
     return {"job_id": job_id, "status": get_container_status(container_id)}
 
 @app.get("/result/{job_id}")
@@ -91,22 +104,24 @@ async def get_progress(job_id: str):
 
 @app.get("/logs/{job_id}")
 async def get_logs(job_id: str):
-    container_id = jobs.get(job_id)
-    if not container_id:
+    job = jobs.get(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    container_id = job.get("container_id")
     return StreamingResponse(stream_container_logs(container_id), media_type="text/plain")
 
 @app.post("/stop/{job_id}")
 async def stop_job(job_id: str):
-    container_id = jobs.get(job_id)
-    if not container_id:
+    job = jobs.get(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    container_id = job.get("container_id")
     return {"message": stop_container(container_id)}
 
 @app.get("/jobs")
 async def list_jobs():
     result = []
-    for job_id, container_id in jobs.items():
+    for job_id, job in jobs.items():
         job_info_path = os.path.join("/opt/opeva_shared_data", "jobs", job_id, "job_info.json")
         job_info = {}
         if os.path.exists(job_info_path):
@@ -114,7 +129,7 @@ async def list_jobs():
                 job_info = json.load(f)
         result.append({
             "job_id": job_id,
-            "status": get_container_status(container_id),
+            "status": get_container_status(job.get("container_id")),
             "job_info": job_info
         })
     return result
@@ -172,3 +187,22 @@ async def delete_config(file_name: str):
     if not success:
         raise HTTPException(status_code=404, detail="Config file not found")
     return {"message": f"Config {file_name} deleted successfully"}
+
+@app.get("/file-logs/{job_id}")
+async def get_file_logs(job_id: str):
+    log_dir = os.path.join("/opt/opeva_shared_data", "jobs", job_id, "logs")
+
+    if not os.path.exists(log_dir):
+        raise HTTPException(status_code=404, detail="Log folder not found for this job")
+
+    # Try to locate the .log file (we assume only one per job)
+    for filename in os.listdir(log_dir):
+        if filename.endswith(".log"):
+            log_path = os.path.join(log_dir, filename)
+            def iter_logs():
+                with open(log_path) as f:
+                    for line in f:
+                        yield line
+            return StreamingResponse(iter_logs(), media_type="text/plain")
+
+    raise HTTPException(status_code=404, detail="Log file not found in logs folder")

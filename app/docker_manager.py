@@ -2,93 +2,54 @@ import docker
 import os
 from app.config import VM_SHARED_DATA
 from app.models import SimulationRequest
-from app.utils import load_jobs  # <-- required for log streaming
+from app.utils import load_jobs, get_job_log_path
 
 jobs = load_jobs()
 
 def get_docker_client(target_host: str):
     if target_host == "local":
-        print("USING LOCAL DOCKER")
-
-        # Force use of host Docker via Unix socket
         return docker.DockerClient(base_url="unix://var/run/docker.sock")
-
-    else:
-        try:
-            print(f"USING REMOTE DOCKER VIA SSH: ssh://{target_host}")
-            client = docker.DockerClient(base_url=f"ssh://{target_host}")
-
-            # Try to test connection (will throw if invalid)
-            client.containers.list()
-            return client
-
-        except Exception as e:
-            raise RuntimeError(f"❌ Could not reach Docker daemon on '{target_host}': {e}")
-        
+    return docker.DockerClient(base_url=f"ssh://{target_host}")
 
 def run_simulation(job_id, request: SimulationRequest, target_host: str):
-    shared_host = VM_SHARED_DATA
-    shared_container = "/data"
-
-    volumes = {
-        shared_host: {"bind": shared_container, "mode": "rw"}
-    }
-
-    command = f"--config /data/{request.config_path} --job_id {job_id}"
-
     docker_client = get_docker_client(target_host)
-
+    volumes = {
+        VM_SHARED_DATA: {"bind": "/data", "mode": "rw"}
+    }
+    container_name = f"opeva_sim_{job_id}"
     try:
-        old = docker_client.containers.get(f"opeva_simulator_{job_id}_{request.job_name}")
-        old.remove(force=True)
+        docker_client.containers.get(container_name).remove(force=True)
     except docker.errors.NotFound:
         pass
-
-    print("About to launch container...")
     container = docker_client.containers.run(
         image="calof/opeva_simulator:latest",
-        command=command,
+        name=container_name,
+        command=f"--config /data/{request.config_path} --job_id {job_id}",
         volumes=volumes,
-        name=f"opeva_simulator_{job_id}_{request.job_name}",
-        detach=True,
-        stdout=True,
-        stderr=True
+        detach=True
     )
-    print("Container launched!", container.id)
-
     return container
 
 def get_container_status(container_id):
     try:
-        container = docker.from_env().containers.get(container_id)
-        container.reload()
-        return container.status
-    except docker.errors.NotFound:
+        return docker.from_env().containers.get(container_id).status
+    except:
         return "not_found"
-    except Exception as e:
-        return f"error: {str(e)}"
 
 def stop_container(container_id):
     try:
-        container = docker.from_env().containers.get(container_id)
-        container.stop()
+        docker.from_env().containers.get(container_id).stop()
         return "stopped"
-    except Exception as e:
-        return f"error: {str(e)}"
+    except:
+        return "not_found"
 
 def stream_container_logs(container_id):
-    try:
-        log_path = os.path.join(VM_SHARED_DATA, "jobs")
-        for job_id, cid in jobs.items():
-            if cid == container_id:
-                path = os.path.join(log_path, job_id, "logs", f"{job_id}.log")
-                if os.path.exists(path):
-                    with open(path) as f:
-                        for line in f:
-                            yield line
-                else:
-                    yield f"Log file not found for job_id {job_id}"
+    for job_id, meta in jobs.items():
+        if meta.get("container_id") == container_id:
+            log_file = get_job_log_path(job_id)
+            if os.path.exists(log_file):
+                with open(log_file) as f:
+                    for line in f:
+                        yield line
                 return
-        yield f"Job not found for container ID: {container_id}"
-    except Exception as e:
-        yield f"Error reading logs: {e}"
+    yield f"Log file not found for container ID: {container_id}"

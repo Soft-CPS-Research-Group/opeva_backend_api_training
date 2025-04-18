@@ -10,6 +10,7 @@ The service provides a REST API to:
 - Stop running jobs if needed
 - Maintain persistent tracking of jobs even after restarts
 - Manage and delete configs or datasets
+- ✨ Stream training log files from simulation container (not just stdout)
 
 The backend is fully integrated with:
 - **OPEVA shared data storage** (`/opt/opeva_shared_data/`)
@@ -91,6 +92,7 @@ This will start:
 | GET    | /result/{job_id}         | Get final results of job          |
 | GET    | /progress/{job_id}       | Get progress updates              |
 | GET    | /logs/{job_id}           | Stream container logs             |
+| GET    | /logs/file/{job_id}      | Stream simulation log file (.log) |
 | POST   | /stop/{job_id}           | Stop a running container/job      |
 | GET    | /jobs                    | List all tracked jobs             |
 | GET    | /job-info/{job_id}       | Get metadata about a job          |
@@ -195,12 +197,17 @@ curl http://<IP>:8000/result/{job_id}
 curl http://<IP>:8000/progress/{job_id}
 ```
 
-### 📄 Stream Logs
+### 📄 Stream Logs (stdout)
 ```bash
 curl http://<IP>:8000/logs/{job_id}
 ```
 
-### ⛔️ Stop Running Job
+### 🗞️ Stream Training Log File (.log)
+```bash
+curl http://<IP>:8000/logs/file/{job_id}
+```
+
+### ❌ Stop Running Job
 ```bash
 curl -X POST http://<IP>:8000/stop/{job_id}
 ```
@@ -210,7 +217,7 @@ curl -X POST http://<IP>:8000/stop/{job_id}
 curl http://<IP>:8000/jobs
 ```
 
-### 📞 Job Metadata
+### 📠 Job Metadata
 ```bash
 curl http://<IP>:8000/job-info/{job_id}
 ```
