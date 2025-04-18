@@ -7,20 +7,25 @@ from app.utils import load_jobs  # <-- required for log streaming
 jobs = load_jobs()
 
 def get_docker_client(target_host: str):
-    print("target_host =", target_host)
     if target_host == "local":
-        print("💡 USING LOCAL DOCKER")
+        print("🐳 USING LOCAL DOCKER")
         print("DOCKER_HOST =", os.getenv("DOCKER_HOST"))
-        client = docker.from_env()
-        print("client.api.base_url =", client.api.base_url)
-        return client
+
+        # Force use of host Docker via Unix socket
+        return docker.DockerClient(base_url="unix://var/run/docker.sock")
+
     else:
         try:
+            print(f"🔐 USING REMOTE DOCKER VIA SSH: ssh://{target_host}")
             client = docker.DockerClient(base_url=f"ssh://{target_host}")
+
+            # Try to test connection (will throw if invalid)
             client.containers.list()
             return client
+
         except Exception as e:
-            raise RuntimeError(f"Could not reach Docker daemon on '{target_host}': {e}")
+            raise RuntimeError(f"❌ Could not reach Docker daemon on '{target_host}': {e}")
+        
 
 def run_simulation(job_id, request: SimulationRequest, target_host: str):
     shared_host = VM_SHARED_DATA
