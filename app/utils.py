@@ -5,7 +5,7 @@ from uuid import uuid4
 from app.config import CONFIGS_DIR, JOB_TRACK_FILE, JOBS_DIR, DATASETS_DIR
 import base64
 import shutil
-
+import datetime, json
 
 def ensure_directories():
     os.makedirs(CONFIGS_DIR, exist_ok=True)
@@ -50,9 +50,8 @@ def save_config_dict(config: dict, file_name: str) -> str:
 
     return f"configs/{file_name}"
 
-def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str, container_id: str, experiment_name: str = None, run_name: str = None):
+def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str, container_id: str, container_name: str, experiment_name: str = None, run_name: str = None):
 
-    import datetime, json
     job_dir = os.path.join(JOBS_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
     info_path = os.path.join(job_dir, "job_info.json")
@@ -62,6 +61,7 @@ def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str
         "config_path": config_path,
         "target_host": target_host,
         "container_id": container_id,
+        "container_name": container_name,
         "started_at": datetime.datetime.utcnow().isoformat() + "Z",
         "experiment_name": experiment_name,
         "run_name": run_name,
