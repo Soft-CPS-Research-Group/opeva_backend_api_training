@@ -42,11 +42,18 @@ def run_simulation(job_id, request: SimulationRequest, target_host: str):
 
     docker_client = get_docker_client(target_host)
 
+    try:
+        old = docker_client.containers.get(f"opeva_simulator_{job_id}_{request.job_name}")
+        old.remove(force=True)
+    except docker.errors.NotFound:
+        pass
+
     print("About to launch container...")
     container = docker_client.containers.run(
         image="calof/opeva_simulator:latest",
         command=command,
         volumes=volumes,
+        name=f"opeva_simulator_{job_id}_{request.job_name}",
         detach=True,
         stdout=True,
         stderr=True

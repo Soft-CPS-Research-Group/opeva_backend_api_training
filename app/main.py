@@ -32,10 +32,11 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
 
         experiment_name = config.get("experiment", {}).get("name")
         run_name = config.get("experiment", {}).get("run_name")
-        
+        job_name=experiment_name + " - " + run_name
+
         sim_request = SimulationRequest(
             config_path=config_path,
-            job_name=experiment_name + " - " + run_name
+            job_name=job_name
         )
 
         container = run_simulation(job_id, sim_request, request.target_host)
@@ -44,10 +45,11 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
 
         save_job_info(
             job_id=job_id,
-            job_name=job_id,
+            job_name=job_name,
             config_path=config_path,
             target_host=request.target_host,
             container_id=container.id,
+            container_name=container.name,
             experiment_name=experiment_name,
             run_name=run_name
         )
@@ -59,7 +61,7 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
             "container_id": container.id,
             "status": "launched",
             "host": request.target_host,
-            "job_name": job_id
+            "job_name": job_name,
         }
     except Exception as e:
         print("\n\n--- Exception Traceback ---")
