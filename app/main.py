@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models import JobLaunchRequest, SimulationRequest
-from app.config import CONFIGS_DIR, DATASETS_DIR
+from app.config import CONFIGS_DIR
 from app.utils import ensure_directories, save_job, save_job_info, load_jobs, save_config_dict, collect_results, read_progress, save_config_file,list_config_files,load_config_file,create_dataset_dir,list_available_datasets
 from app.docker_manager import run_simulation, get_container_status, stop_container, stream_container_logs
 import os
