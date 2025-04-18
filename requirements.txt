@@ -1,4 +1,4 @@
-docker_py==1.10.6
+docker>=6.0.0
 fastapi==0.115.12
 pydantic==2.11.3
 PyYAML==6.0.2
