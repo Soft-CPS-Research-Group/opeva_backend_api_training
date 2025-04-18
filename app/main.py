@@ -10,12 +10,13 @@ import yaml
 from uuid import uuid4
 import traceback
 
-app = FastAPI()
+app = FastAPI(debug=True)
 jobs = load_jobs()
 ensure_directories()
 
 @app.post("/run-simulation")
 async def run_simulation_from_ui(request: JobLaunchRequest):
+    print("AQUI")
     try:
         print("AAAA")
         job_id = str(uuid4())
