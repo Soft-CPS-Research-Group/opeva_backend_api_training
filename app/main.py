@@ -156,7 +156,7 @@ async def get_datasets():
 
 @app.delete("/job/{job_id}")
 async def delete_job(job_id: str):
-    success = delete_job_by_id(job_id)
+    success = delete_job_by_id(job_id, jobs)
     if not success:
         raise HTTPException(status_code=404, detail="Job not found or already deleted")
     return {"message": f"Job {job_id} deleted successfully"}

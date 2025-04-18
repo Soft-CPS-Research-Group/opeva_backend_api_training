@@ -35,7 +35,7 @@ def run_simulation(job_id, request: SimulationRequest, target_host: str):
     }
 
     command = (
-        f"python wrapper.py "
+        f"python docker_run.py "
         f"--config /data/{request.config_path} "
         f"--job_id {job_id}"
     )

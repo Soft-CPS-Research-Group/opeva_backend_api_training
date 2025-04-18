@@ -107,15 +107,17 @@ def list_available_datasets():
     datasets_path = DATASETS_DIR
     return [d for d in os.listdir(datasets_path) if os.path.isdir(os.path.join(datasets_path, d))]
 
-def delete_job_by_id(job_id: str) -> bool:
+def delete_job_by_id(job_id: str, jobs: dict) -> bool:
     job_path = os.path.join(JOBS_DIR, job_id)
     if os.path.exists(job_path):
         shutil.rmtree(job_path)
-        jobs = load_jobs()
-        if job_id in jobs:
-            del jobs[job_id]
+        tracked_jobs = load_jobs()
+        if job_id in tracked_jobs:
+            del tracked_jobs[job_id]
             with open(JOB_TRACK_FILE, "w") as f:
-                json.dump(jobs, f)
+                json.dump(tracked_jobs, f)
+        if job_id in jobs:
+            del jobs[job_id]  # ✅ remove from memory
         return True
     return False
 
