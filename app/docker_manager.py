@@ -34,11 +34,7 @@ def run_simulation(job_id, request: SimulationRequest, target_host: str):
         shared_host: {"bind": shared_container, "mode": "rw"}
     }
 
-    command = (
-        f"python docker_run.py "
-        f"--config /data/{request.config_path} "
-        f"--job_id {job_id}"
-    )
+    command = f"--config /data/{request.config_path} --job_id {job_id}"
 
     docker_client = get_docker_client(target_host)
 
