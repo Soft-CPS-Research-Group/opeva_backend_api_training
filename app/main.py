@@ -4,8 +4,7 @@ from app.models import JobLaunchRequest, SimulationRequest
 from app.config import CONFIGS_DIR
 from app.utils import (
     delete_job_by_id, delete_config_by_name, ensure_directories, save_job,
-    save_job_info, load_jobs, save_config_dict, collect_results, read_progress,
-    save_config_file, list_config_files, load_config_file, create_dataset_dir,
+    save_job_info, load_jobs, save_config_dict, collect_results, read_progress, list_config_files, load_config_file, create_dataset_dir,
     list_available_datasets
 )
 from app.docker_manager import run_simulation, get_container_status, stop_container, stream_container_logs
@@ -149,7 +148,7 @@ async def health():
 @app.post("/config")
 async def create_config_file(config: dict = Body(...), file_name: str = Body(...)):
     try:
-        save_config_file(config, file_name)
+        save_config_dict(config, file_name)
         return {"message": "Config saved", "file": file_name}
     except FileExistsError as e:
         raise HTTPException(status_code=400, detail=str(e))
