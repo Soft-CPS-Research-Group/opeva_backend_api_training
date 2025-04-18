@@ -16,7 +16,7 @@ def run_simulation(job_id, request: SimulationRequest, target_host: str):
     volumes = {
         VM_SHARED_DATA: {"bind": "/data", "mode": "rw"}
     }
-    container_name = f"opeva_sim_{job_id}"
+    container_name = f"opeva_sim_{job_id}_{request.job_name}"
     try:
         docker_client.containers.get(container_name).remove(force=True)
     except docker.errors.NotFound:

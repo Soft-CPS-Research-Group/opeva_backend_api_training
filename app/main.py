@@ -189,15 +189,19 @@ async def delete_config(file_name: str):
 
 @app.get("/file-logs/{job_id}")
 async def get_file_logs(job_id: str):
+    print("AQUI")
     log_dir = os.path.join("/opt/opeva_shared_data", "jobs", job_id, "logs")
-
+    print("AQUI2")
     if not os.path.exists(log_dir):
         raise HTTPException(status_code=404, detail="Log folder not found for this job")
-
+    print("AQUI3")
     # Try to locate the .log file (we assume only one per job)
     for filename in os.listdir(log_dir):
+        print("AQUI4")
         if filename.endswith(".log"):
+            print("AQUI5")
             log_path = os.path.join(log_dir, filename)
+            print("AQUI6")
             def iter_logs():
                 with open(log_path) as f:
                     for line in f:
