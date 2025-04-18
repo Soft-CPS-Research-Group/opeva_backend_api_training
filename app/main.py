@@ -35,6 +35,9 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
         run_name = config.get("experiment", {}).get("run_name")
         job_name=re.sub(r'[^a-zA-Z0-9_.-]', '_', experiment_name + " - " + run_name)
 
+        # Ensure path is under configs/ if not already
+        if not config_path.startswith("configs/"):
+            config_path = f"configs/{config_path}"
 
         sim_request = SimulationRequest(
             config_path=config_path,

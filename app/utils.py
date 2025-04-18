@@ -48,7 +48,7 @@ def save_config_dict(config: dict, file_name: str) -> str:
     with open(full_path, "w") as f:
         yaml.dump(config, f)
 
-    return f"configs/{file_name}"
+    return file_name
 
 def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str, container_id: str, container_name: str, experiment_name: str = None, run_name: str = None):
 
