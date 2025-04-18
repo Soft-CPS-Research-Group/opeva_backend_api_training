@@ -4,6 +4,8 @@ import yaml
 from uuid import uuid4
 from app.config import CONFIGS_DIR, JOB_TRACK_FILE, JOBS_DIR, DATASETS_DIR
 import base64
+import shutil
+
 
 def ensure_directories():
     os.makedirs(CONFIGS_DIR, exist_ok=True)
@@ -104,3 +106,23 @@ def create_dataset_dir(name: str, schema: dict, data_files: dict = None):
 def list_available_datasets():
     datasets_path = DATASETS_DIR
     return [d for d in os.listdir(datasets_path) if os.path.isdir(os.path.join(datasets_path, d))]
+
+def delete_job_by_id(job_id: str) -> bool:
+    job_path = os.path.join(JOBS_DIR, job_id)
+    if os.path.exists(job_path):
+        shutil.rmtree(job_path)
+        jobs = load_jobs()
+        if job_id in jobs:
+            del jobs[job_id]
+            with open(JOB_TRACK_FILE, "w") as f:
+                json.dump(jobs, f)
+        return True
+    return False
+
+
+def delete_config_by_name(file_name: str) -> bool:
+    config_path = os.path.join(CONFIGS_DIR, file_name)
+    if os.path.exists(config_path):
+        os.remove(config_path)
+        return True
+    return False

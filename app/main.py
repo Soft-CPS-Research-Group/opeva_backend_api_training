@@ -2,14 +2,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models import JobLaunchRequest, SimulationRequest
 from app.config import CONFIGS_DIR
-from app.utils import ensure_directories, save_job, save_job_info, load_jobs, save_config_dict, collect_results, read_progress, save_config_file,list_config_files,load_config_file,create_dataset_dir,list_available_datasets
+from app.utils import delete_job_by_id, delete_config_by_name, ensure_directories, save_job, save_job_info, load_jobs, save_config_dict, collect_results, read_progress, save_config_file,list_config_files,load_config_file,create_dataset_dir,list_available_datasets
 from app.docker_manager import run_simulation, get_container_status, stop_container, stream_container_logs
 import os
 import json
 import yaml
 from uuid import uuid4
-from fastapi import UploadFile, File
-from fastapi.responses import FileResponse
 from fastapi import Body
 import base64
 
@@ -32,17 +30,17 @@ async def run_simulation_from_ui(request: JobLaunchRequest):
         else:
             raise HTTPException(status_code=400, detail="Missing config or config_path")
 
+        experiment_name = config.get("experiment", {}).get("name")
+        run_name = config.get("experiment", {}).get("run_name")
+        
         sim_request = SimulationRequest(
             config_path=config_path,
-            job_name=job_id
+            job_name=experiment_name + " - " + run_name
         )
 
         container = run_simulation(job_id, sim_request, request.target_host)
 
-        save_job(job_id, container.id)
-
-        experiment_name = config.get("experiment", {}).get("name")
-        run_name = config.get("experiment", {}).get("run_name")
+        save_job(job_id, container.id)        
 
         save_job_info(
             job_id=job_id,
@@ -153,3 +151,17 @@ async def create_dataset(name: str = Body(...), schema: dict = Body(...), data_f
 @app.get("/datasets")
 async def get_datasets():
     return list_available_datasets()
+
+@app.delete("/job/{job_id}")
+async def delete_job(job_id: str):
+    success = delete_job_by_id(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Job not found or already deleted")
+    return {"message": f"Job {job_id} deleted successfully"}
+
+@app.delete("/config/{file_name}")
+async def delete_config(file_name: str):
+    success = delete_config_by_name(file_name)
+    if not success:
+        raise HTTPException(status_code=404, detail="Config file not found")
+    return {"message": f"Config {file_name} deleted successfully"}
