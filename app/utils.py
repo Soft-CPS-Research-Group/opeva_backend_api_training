@@ -2,7 +2,8 @@ import json
 import os
 import yaml
 from uuid import uuid4
-from app.config import CONFIGS_DIR, JOB_TRACK_FILE, JOBS_DIR
+from app.config import CONFIGS_DIR, JOB_TRACK_FILE, JOBS_DIR, DATASETS_DIR
+import base64
 
 def ensure_directories():
     os.makedirs(CONFIGS_DIR, exist_ok=True)
@@ -40,14 +41,11 @@ def read_progress(job_id):
         return {"progress": "No updates yet."}
 
 def save_config_dict(config: dict, file_name: str) -> str:
-    print("CCCCC - 1")
     full_path = os.path.join(CONFIGS_DIR, file_name)
-    print("CCCCC - 2")
 
     with open(full_path, "w") as f:
         yaml.dump(config, f)
-    print("CCCCC - 3")
-    print(full_path)
+
     return f"configs/{file_name}"
 
 def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str, container_id: str, experiment_name: str = None, run_name: str = None):
@@ -68,3 +66,41 @@ def save_job_info(job_id: str, job_name: str, config_path: str, target_host: str
     }
     with open(info_path, "w") as f:
         json.dump(info, f, indent=2)
+
+def save_config_file(config: dict, file_name: str) -> str:
+    file_path = os.path.join(CONFIGS_DIR, file_name)
+    if os.path.exists(file_path):
+        raise FileExistsError(f"File {file_name} already exists")
+    with open(file_path, "w") as f:
+        yaml.dump(config, f)
+    return file_path
+
+def list_config_files() -> list:
+    return [f for f in os.listdir(CONFIGS_DIR) if f.endswith(".yaml") or f.endswith(".yml")]
+
+def load_config_file(file_name: str) -> dict:
+    file_path = os.path.join(CONFIGS_DIR, file_name)
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Config {file_name} not found")
+    with open(file_path, "r") as f:
+        return yaml.safe_load(f)
+
+def create_dataset_dir(name: str, schema: dict, data_files: dict = None):
+    dataset_path = os.path.join(DATASETS_DIR, "datasets", name)
+    os.makedirs(dataset_path, exist_ok=True)
+
+    schema_path = os.path.join(dataset_path, "schema.json")
+    with open(schema_path, "w") as f:
+        json.dump(schema, f, indent=2)
+
+    if data_files:
+        for fname, b64content in data_files.items():
+            file_path = os.path.join(dataset_path, fname)
+            with open(file_path, "wb") as f:
+                f.write(base64.b64decode(b64content))
+
+    return dataset_path
+
+def list_available_datasets():
+    datasets_path = DATASETS_DIR
+    return [d for d in os.listdir(datasets_path) if os.path.isdir(os.path.join(datasets_path, d))]

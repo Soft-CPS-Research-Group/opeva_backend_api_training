@@ -8,15 +8,14 @@ jobs = load_jobs()
 
 def get_docker_client(target_host: str):
     if target_host == "local":
-        print("🐳 USING LOCAL DOCKER")
-        print("DOCKER_HOST =", os.getenv("DOCKER_HOST"))
+        print("USING LOCAL DOCKER")
 
         # Force use of host Docker via Unix socket
         return docker.DockerClient(base_url="unix://var/run/docker.sock")
 
     else:
         try:
-            print(f"🔐 USING REMOTE DOCKER VIA SSH: ssh://{target_host}")
+            print(f"USING REMOTE DOCKER VIA SSH: ssh://{target_host}")
             client = docker.DockerClient(base_url=f"ssh://{target_host}")
 
             # Try to test connection (will throw if invalid)
@@ -41,15 +40,9 @@ def run_simulation(job_id, request: SimulationRequest, target_host: str):
         f"--job_id {job_id}"
     )
 
-    print("FFFF - 5")
-
     docker_client = get_docker_client(target_host)
 
-    print("DEBUG: docker_client =", docker_client)
-    print("DEBUG: docker_client.containers =", docker_client.containers)
-    print("DEBUG: type(docker_client.containers) =", type(docker_client.containers))
-
-    print("🛫 About to launch container...")
+    print("About to launch container...")
     container = docker_client.containers.run(
         image="calof/opeva_simulator:latest",
         command=command,
@@ -58,8 +51,7 @@ def run_simulation(job_id, request: SimulationRequest, target_host: str):
         stdout=True,
         stderr=True
     )
-    print("✅ Container launched!", container.id)
-
+    print("Container launched!", container.id)
 
     return container
 
