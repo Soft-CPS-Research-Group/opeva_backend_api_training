@@ -104,6 +104,7 @@ This will start:
 | DELETE | /config/{file}           | Delete a config file              |
 | POST   | /dataset                 | Create a new dataset structure    |
 | GET    | /datasets                | List all available datasets       |
+| GET    | /hosts                   | List all available hosts          |
 
 ---
 
@@ -220,6 +221,11 @@ curl http://<IP>:8000/jobs
 ### 📠 Job Metadata
 ```bash
 curl http://<IP>:8000/job-info/{job_id}
+```
+
+### Available Hosts
+```bash
+curl http://<IP>:8000/hosts
 ```
 
 ### ❤️ Health Check

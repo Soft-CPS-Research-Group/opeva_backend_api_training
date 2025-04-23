@@ -2,7 +2,7 @@ import docker
 import os
 from app.config import VM_SHARED_DATA
 from app.models import SimulationRequest
-from app.utils import load_jobs, get_job_log_path
+from app.utils import load_jobs, get_job_log_path, is_valid_host
 
 jobs = load_jobs()
 
@@ -12,6 +12,10 @@ def get_docker_client(target_host: str):
     return docker.DockerClient(base_url=f"ssh://{target_host}")
 
 def run_simulation(job_id, request: SimulationRequest, target_host: str):
+
+    if not is_valid_host(target_host):
+        raise ValueError(f"Invalid host selected: {target_host}")
+    
     docker_client = get_docker_client(target_host)
     volumes = {
         VM_SHARED_DATA: {"bind": "/data", "mode": "rw"}

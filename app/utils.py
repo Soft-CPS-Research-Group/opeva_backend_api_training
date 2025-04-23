@@ -6,6 +6,7 @@ from app.config import CONFIGS_DIR, JOB_TRACK_FILE, JOBS_DIR, DATASETS_DIR
 import base64
 import shutil
 import datetime
+from app.config import AVAILABLE_HOSTS
 
 def ensure_directories():
     os.makedirs(CONFIGS_DIR, exist_ok=True)
@@ -113,3 +114,9 @@ def list_available_datasets():
 
 def get_job_log_path(job_id: str):
     return os.path.join(JOBS_DIR, job_id, "logs", f"{job_id}.log")
+
+def get_available_hosts():
+    return AVAILABLE_HOSTS
+
+def is_valid_host(target_host: str) -> bool:
+    return any(h["host"] == target_host for h in AVAILABLE_HOSTS)

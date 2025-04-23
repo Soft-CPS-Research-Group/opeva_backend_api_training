@@ -1,12 +1,9 @@
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import StreamingResponse
 from app.models import JobLaunchRequest, SimulationRequest
+from app.utils import get_available_hosts
 from app.config import CONFIGS_DIR
-from app.utils import (
-    delete_job_by_id, delete_config_by_name, ensure_directories, save_job,
-    save_job_info, load_jobs, save_config_dict, collect_results, read_progress, list_config_files, load_config_file, create_dataset_dir,
-    list_available_datasets
-)
+from app.utils import delete_job_by_id, delete_config_by_name, ensure_directories, save_job, save_job_info, load_jobs, save_config_dict, collect_results, read_progress, list_config_files, load_config_file, create_dataset_dir,list_available_datasets
 from app.docker_manager import run_simulation, get_container_status, stop_container, stream_container_logs
 import os
 import json
@@ -189,19 +186,15 @@ async def delete_config(file_name: str):
 
 @app.get("/file-logs/{job_id}")
 async def get_file_logs(job_id: str):
-    print("AQUI")
     log_dir = os.path.join("/opt/opeva_shared_data", "jobs", job_id, "logs")
-    print("AQUI2")
+
     if not os.path.exists(log_dir):
         raise HTTPException(status_code=404, detail="Log folder not found for this job")
-    print("AQUI3")
+
     # Try to locate the .log file (we assume only one per job)
     for filename in os.listdir(log_dir):
-        print("AQUI4")
         if filename.endswith(".log"):
-            print("AQUI5")
             log_path = os.path.join(log_dir, filename)
-            print("AQUI6")
             def iter_logs():
                 with open(log_path) as f:
                     for line in f:
@@ -209,3 +202,7 @@ async def get_file_logs(job_id: str):
             return StreamingResponse(iter_logs(), media_type="text/plain")
 
     raise HTTPException(status_code=404, detail="Log file not found in logs folder")
+
+@app.get("/hosts")
+def list_hosts():
+    return {"available_hosts": get_available_hosts()}
