@@ -25,12 +25,34 @@ The backend is fully integrated with:
 
 ```
 opeva_backend_api_training/
-├── app/
-│   ├── config.py             # Central config (paths, shared data, MongoDB)
-│   ├── docker_manager.py     # Docker operations (run, stop, status, logs)
-│   ├── main.py               # FastAPI application (includes MongoDB endpoints)
-│   ├── models.py             # Request models
-│   └── utils.py              # Utilities: job persistence, results, progress, MongoDB helpers
+app/
+├── api/                        # Routes (API layer)
+│   ├── endpoints/
+│   │   ├── jobs.py
+│   │   ├── configs.py
+│   │   ├── datasets.py
+│   │   ├── mongo.py
+│   │   └── health.py
+│   └── router.py               # Main APIRouter() mounting subroutes
+├── controllers/               # Controllers - HTTP-facing logic
+│   ├── job_controller.py
+│   ├── config_controller.py
+│   ├── dataset_controller.py
+│   └── mongo_controller.py
+├── services/                  # Business logic
+│   ├── job_service.py
+│   ├── config_service.py
+│   ├── dataset_service.py
+│   └── mongo_service.py
+├── models/                    # Pydantic models and domain entities
+│   └── job.py
+├── utils/                     # Low-level utilities
+│   ├── docker_manager.py
+│   ├── job_utils.py
+│   ├── file_utils.py
+│   └── mongo_utils.py
+├── config.py
+├── main.py                    # Just mounts router
 ├── Dockerfile                # Containerization
 ├── requirements.txt          # Dependencies
 ├── .github/workflows/        # GitHub Actions CI/CD
