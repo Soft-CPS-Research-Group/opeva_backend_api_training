@@ -7,6 +7,8 @@ import base64
 import shutil
 import datetime
 from app.config import AVAILABLE_HOSTS
+from pymongo import MongoClient
+from config import mongo_uri
 
 def ensure_directories():
     os.makedirs(CONFIGS_DIR, exist_ok=True)
@@ -120,3 +122,11 @@ def get_available_hosts():
 
 def is_valid_host(target_host: str) -> bool:
     return any(h["host"] == target_host for h in AVAILABLE_HOSTS)
+
+
+_connections = {}
+
+def get_db(db_name: str):
+    if db_name not in _connections:
+        _connections[db_name] = MongoClient(mongo_uri(db_name))[db_name]
+    return _connections[db_name]

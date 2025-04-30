@@ -11,6 +11,7 @@ The service provides a REST API to:
 - Maintain persistent tracking of jobs even after restarts
 - Manage and delete configs or datasets
 - ✨ Stream training log files from simulation container (not just stdout)
+- Retrieve data from MongoDB collections (Living Lab and iCharging Headquarters)
 
 The backend is fully integrated with:
 - **OPEVA shared data storage** (`/opt/opeva_shared_data/`)
@@ -24,16 +25,16 @@ The backend is fully integrated with:
 
 ```
 opeva_backend_api_training/
-├── app/ 
-│   ├── config.py             # Central config (paths, shared data) 
-│   ├── docker_manager.py     # Docker operations (run, stop, status, logs) 
-│   ├── main.py               # FastAPI application 
-│   ├── models.py             # Request models 
-│   └── utils.py              # Utilities: job persistence, results, progress 
-├── Dockerfile                # Containerization 
-├── requirements.txt          # Dependencies 
-├── .github/workflows/        # GitHub Actions CI/CD 
-│   └── docker-publish.yml 
+├── app/
+│   ├── config.py             # Central config (paths, shared data, MongoDB)
+│   ├── docker_manager.py     # Docker operations (run, stop, status, logs)
+│   ├── main.py               # FastAPI application (includes MongoDB endpoints)
+│   ├── models.py             # Request models
+│   └── utils.py              # Utilities: job persistence, results, progress, MongoDB helpers
+├── Dockerfile                # Containerization
+├── requirements.txt          # Dependencies
+├── .github/workflows/        # GitHub Actions CI/CD
+│   └── docker-publish.yml
 ├── README.md                 # This file
 ```
 
@@ -45,6 +46,7 @@ This service is part of the **OPEVA Infra Services** stack and communicates with
 - MLflow: `http://mlflow:5000`
 - Simulation services: dynamically launched containers
 - Shared storage: `/opt/opeva_shared_data/`
+- MongoDB databases: `living_lab` and `i-charging_headquarters`
 
 The service attaches to the external Docker network:
 ```
@@ -87,24 +89,26 @@ This will start:
 
 | Method | Endpoint                  | Description                       |
 |--------|---------------------------|-----------------------------------|
+| GET    | /api/icharging-headquarters | Retrieve iCharging headquarters data from MongoDB |
+| GET    | /api/living-lab           | Retrieve all Living Lab data from MongoDB |
 | POST   | /run-simulation           | Launch a new simulation job       |
-| GET    | /status/{job_id}         | Check job status                  |
-| GET    | /result/{job_id}         | Get final results of job          |
-| GET    | /progress/{job_id}       | Get progress updates              |
-| GET    | /logs/{job_id}           | Stream container logs             |
-| GET    | /logs/file/{job_id}      | Stream simulation log file (.log) |
-| POST   | /stop/{job_id}           | Stop a running container/job      |
-| GET    | /jobs                    | List all tracked jobs             |
-| GET    | /job-info/{job_id}       | Get metadata about a job          |
-| DELETE | /job/{job_id}            | Delete job and its files          |
-| GET    | /health                  | Health check of the API           |
-| POST   | /config/create           | Create new config file            |
-| GET    | /configs                 | List all config files             |
-| GET    | /config/{file}           | View a config file                |
-| DELETE | /config/{file}           | Delete a config file              |
-| POST   | /dataset                 | Create a new dataset structure    |
-| GET    | /datasets                | List all available datasets       |
-| GET    | /hosts                   | List all available hosts          |
+| GET    | /status/{job_id}          | Check job status                  |
+| GET    | /result/{job_id}          | Get final results of job          |
+| GET    | /progress/{job_id}        | Get progress updates              |
+| GET    | /logs/{job_id}            | Stream container logs             |
+| GET    | /logs/file/{job_id}       | Stream simulation log file (.log) |
+| POST   | /stop/{job_id}            | Stop a running container/job      |
+| GET    | /jobs                     | List all tracked jobs             |
+| GET    | /job-info/{job_id}        | Get metadata about a job          |
+| DELETE | /job/{job_id}             | Delete job and its files          |
+| GET    | /health                   | Health check of the API           |
+| POST   | /config/create            | Create new config file            |
+| GET    | /configs                  | List all config files             |
+| GET    | /config/{file}            | View a config file                |
+| DELETE | /config/{file}            | Delete a config file              |
+| POST   | /dataset                  | Create a new dataset structure    |
+| GET    | /datasets                 | List all available datasets       |
+| GET    | /hosts                    | List all available hosts          |
 
 ---
 
@@ -282,4 +286,17 @@ curl http://<IP>:8000/datasets
 curl -X DELETE http://<IP>:8000/job/{job_id}
 ```
 
+## 📰 MongoDB Endpoints Usage Examples
+
+### ✅ Retrieve iCharging Headquarters data
+```bash
+curl http://<IP>:8000/api/icharging-headquarters
+```
+
+### ✅ Retrieve all Living Lab data
+```bash
+curl http://<IP>:8000/api/living-lab
+```
+
 ---
+

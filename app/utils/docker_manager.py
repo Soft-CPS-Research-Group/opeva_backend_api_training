@@ -1,38 +1,33 @@
 import docker
 import os
-from app.config import VM_SHARED_DATA
-from app.models import SimulationRequest
-from app.utils import load_jobs, get_job_log_path, is_valid_host
+from app.config import settings
+from app.models.job import SimulationRequest
+from app.utils.job_utils import load_jobs, get_job_log_path, is_valid_host
 
 jobs = load_jobs()
 
-def get_docker_client(target_host: str):
+def get_docker_client(target_host):
     if target_host == "local":
         return docker.DockerClient(base_url="unix://var/run/docker.sock")
     return docker.DockerClient(base_url=f"ssh://{target_host}")
 
-def run_simulation(job_id, request: SimulationRequest, target_host: str):
-
+def run_simulation(job_id, request: SimulationRequest, target_host):
     if not is_valid_host(target_host):
-        raise ValueError(f"Invalid host selected: {target_host}")
-    
-    docker_client = get_docker_client(target_host)
-    volumes = {
-        VM_SHARED_DATA: {"bind": "/data", "mode": "rw"}
-    }
+        raise ValueError(f"Invalid host: {target_host}")
+    client = get_docker_client(target_host)
+    volumes = {settings.VM_SHARED_DATA: {"bind": "/data", "mode": "rw"}}
     container_name = f"opeva_sim_{job_id}_{request.job_name}"
     try:
-        docker_client.containers.get(container_name).remove(force=True)
+        client.containers.get(container_name).remove(force=True)
     except docker.errors.NotFound:
         pass
-    container = docker_client.containers.run(
+    return client.containers.run(
         image="calof/opeva_simulator:latest",
         name=container_name,
         command=f"--config /data/{request.config_path} --job_id {job_id}",
         volumes=volumes,
         detach=True
     )
-    return container
 
 def get_container_status(container_id):
     try:
@@ -56,4 +51,4 @@ def stream_container_logs(container_id):
                     for line in f:
                         yield line
                 return
-    yield f"Log file not found for container ID: {container_id}"
+    yield f"Log not found for container ID: {container_id}"
