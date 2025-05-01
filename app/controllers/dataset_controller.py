@@ -1,7 +1,10 @@
 from app.services import dataset_service
 
-def create_dataset(name: str, schema: dict, data_files: dict):
-    return dataset_service.create_dataset(name, schema, data_files)
+def create_dataset(name: str, site_id: str, config: dict, from_ts: str = None, until_ts: str = None):
+    return dataset_service.create_dataset(name, site_id, config, from_ts, until_ts)
 
 def list_datasets():
     return dataset_service.list_datasets()
+
+def delete_dataset(name: str):
+    return dataset_service.delete_dataset(name)

@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     MONGO_PORT: int = 27017
     MONGO_AUTH_SOURCE: str = "admin"
 
+    BUILDING_DATASET_CSV_HEADER = ["timestamp", "power_consumption", "solar_generation", "ev_charge", "battery_state"]
+    EV_DATASET_CSV_HEADER = ["timestamp", "power_consumption", "solar_generation", "ev_charge", "battery_state"]
+
     def mongo_uri(self, db_name: str) -> str:
         return f"mongodb://{self.MONGO_USER}:{self.MONGO_PASSWORD}@{self.MONGO_HOST}:{self.MONGO_PORT}/{db_name}?authSource={self.MONGO_AUTH_SOURCE}"
 

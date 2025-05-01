@@ -1,5 +1,8 @@
 import os, json, yaml, base64
 from app.config import settings
+from app.utils import mongo_utils
+import datetime
+import shutil
 
 def save_config_dict(config: dict, file_name: str) -> str:
     full_path = os.path.join(settings.CONFIGS_DIR, file_name)
@@ -38,16 +41,78 @@ def read_progress(job_id):
             return json.load(f)
     return {"progress": "No updates yet."}
 
-def create_dataset_dir(name, schema, files=None):
+def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = None, until_ts: str = None):
     path = os.path.join(settings.DATASETS_DIR, name)
     os.makedirs(path, exist_ok=True)
+
+    db = mongo_utils.get_db(site_id)
+    collection_names = db.list_collection_names()
+
+    #Ve melhor daqui para baixo. Aqui a idea é ir buscar as collections e ir buscar separadamente buildings e evs. Mas os nomes nao estao assim
+    building_collections = [c for c in collection_names if c.startswith("building_")]
+    ev_collections = [c for c in collection_names if c.startswith("ev_")]
+
+    #Pode existir ou não. Se existir, converte para datetime. Se não existir, ignora e tras tudo
+    from_dt = datetime.fromisoformat(from_ts.replace("Z", "")) if from_ts else None
+    until_dt = datetime.fromisoformat(until_ts.replace("Z", "")) if until_ts else None
+
+    #Aqui é para criar os csvs. Se o timestamp não existir, ignora e tras tudo. Se existir, ignora os que estão fora do range
+    #Acho que o ideal era fazer um filtro na query, mas assim é mais simples. Se houver muitos dados, pode ser mais lento
+    def write_csv(collection_name, data):
+        filtered_data = []
+        for doc in data:
+            ts = doc.get("timestamp")
+            if ts:
+                try:
+                    ts_dt = datetime.fromisoformat(ts.replace("Z", ""))
+                    if (from_dt and ts_dt < from_dt) or (until_dt and ts_dt > until_dt):
+                        continue
+                except Exception:
+                    pass
+            filtered_data.append(doc)
+
+        with open(os.path.join(path, f"{collection_name}.csv"), "w") as f:
+            f.write(",".join(settings.DATASET_CSV_HEADER) + "\n")
+            for doc in filtered_data:
+                row = [
+                    doc.get("timestamp", ""),
+                    doc.get("power_consumption", ""),
+                    doc.get("solar_generation", ""),
+                    doc.get("ev_charge", ""),
+                    doc.get("battery_state", "")
+                ]
+                f.write(",".join(map(str, row)) + "\n")
+
+    for col in building_collections:
+        write_csv(col, list(db[col].find({})))
+
+    for col in ev_collections:
+        write_csv(col, list(db[col].find({})))
+
+    # Fetch the structure from the special "schema" collection
+    structure_doc = db["schema"].find_one()
+    if not structure_doc:
+        raise ValueError(f"Missing 'schema' collection in site '{site_id}'")
+
+    # Remove MongoDB _id if present
+    structure_doc.pop("_id", None)
+
+    schema = {
+        **config,
+        "structure": structure_doc
+    }
+
     with open(os.path.join(path, "schema.json"), "w") as f:
         json.dump(schema, f, indent=2)
-    if files:
-        for fname, b64 in files.items():
-            with open(os.path.join(path, fname), "wb") as f:
-                f.write(base64.b64decode(b64))
+
     return path
 
 def list_available_datasets():
     return [d for d in os.listdir(settings.DATASETS_DIR) if os.path.isdir(os.path.join(settings.DATASETS_DIR, d))]
+
+def delete_dataset_by_name(name: str) -> bool:
+    path = os.path.join(settings.DATASETS_DIR, name)
+    if os.path.exists(path) and os.path.isdir(path):
+        shutil.rmtree(path)
+        return True
+    return False

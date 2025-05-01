@@ -12,6 +12,7 @@ The service provides a REST API to:
 - Manage and delete configs or datasets
 - ✨ Stream training log files from simulation container (not just stdout)
 - Retrieve data from MongoDB collections (Living Lab and iCharging Headquarters)
+- Create datasets from MongoDB data with per-building and per-EV CSVs
 
 The backend is fully integrated with:
 - **OPEVA shared data storage** (`/opt/opeva_shared_data/`)
@@ -109,28 +110,30 @@ This will start:
 
 ## API Overview
 
-| Method | Endpoint                  | Description                       |
-|--------|---------------------------|-----------------------------------|
-| GET    | /api/icharging-headquarters | Retrieve iCharging headquarters data from MongoDB |
-| GET    | /api/living-lab           | Retrieve all Living Lab data from MongoDB |
-| POST   | /run-simulation           | Launch a new simulation job       |
-| GET    | /status/{job_id}          | Check job status                  |
-| GET    | /result/{job_id}          | Get final results of job          |
-| GET    | /progress/{job_id}        | Get progress updates              |
-| GET    | /logs/{job_id}            | Stream container logs             |
-| GET    | /logs/file/{job_id}       | Stream simulation log file (.log) |
-| POST   | /stop/{job_id}            | Stop a running container/job      |
-| GET    | /jobs                     | List all tracked jobs             |
-| GET    | /job-info/{job_id}        | Get metadata about a job          |
-| DELETE | /job/{job_id}             | Delete job and its files          |
-| GET    | /health                   | Health check of the API           |
-| POST   | /config/create            | Create new config file            |
-| GET    | /configs                  | List all config files             |
-| GET    | /config/{file}            | View a config file                |
-| DELETE | /config/{file}            | Delete a config file              |
-| POST   | /dataset                  | Create a new dataset structure    |
-| GET    | /datasets                 | List all available datasets       |
-| GET    | /hosts                    | List all available hosts          |
+| Method | Endpoint                                | Description                                                                 |
+|--------|-----------------------------------------|-----------------------------------------------------------------------------|
+| GET    | /sites                                  | List available MongoDB databases (each representing a "site")              |
+| GET    | /real-time-data/{site_name}             | Retrieve all collections and documents from the specified MongoDB site     |
+| GET    | /real-time-data/{site_name}?minutes=X   | Retrieve only documents from the last X minutes across all collections     |
+| POST   | /run-simulation                         | Launch a new simulation job                                                |
+| GET    | /status/{job_id}                        | Check job status                                                           |
+| GET    | /result/{job_id}                        | Get final results of job                                                   |
+| GET    | /progress/{job_id}                      | Get progress updates                                                       |
+| GET    | /logs/{job_id}                          | Stream container logs                                                      |
+| GET    | /logs/file/{job_id}                     | Stream simulation log file (.log)                                          |
+| POST   | /stop/{job_id}                          | Stop a running container/job                                               |
+| GET    | /jobs                                   | List all tracked jobs                                                      |
+| GET    | /job-info/{job_id}                      | Get metadata about a job                                                   |
+| DELETE | /job/{job_id}                           | Delete job and its files                                                   |
+| GET    | /health                                 | Health check of the API                                                    |
+| POST   | /config/create                          | Create new config file                                                     |
+| GET    | /configs                                | List all config files                                                      |
+| GET    | /config/{file}                          | View a config file                                                         |
+| DELETE | /config/{file}                          | Delete a config file                                                       |
+| POST   | /dataset                                | Create a new dataset from a MongoDB site (buildings + EVs to CSVs)         |
+| GET    | /datasets                               | List all available datasets                                                |
+| DELETE | /dataset/{name}                         | Delete a dataset and its contents                                          |
+| GET    | /hosts                                  | List all available hosts                                                   |
 
 ---
 
@@ -229,7 +232,7 @@ curl http://<IP>:8000/progress/{job_id}
 curl http://<IP>:8000/logs/{job_id}
 ```
 
-### 🗞️ Stream Training Log File (.log)
+### 🟞️ Stream Training Log File (.log)
 ```bash
 curl http://<IP>:8000/logs/file/{job_id}
 ```
@@ -244,7 +247,7 @@ curl -X POST http://<IP>:8000/stop/{job_id}
 curl http://<IP>:8000/jobs
 ```
 
-### 📠 Job Metadata
+### 📰 Job Metadata
 ```bash
 curl http://<IP>:8000/job-info/{job_id}
 ```
@@ -288,19 +291,30 @@ curl http://<IP>:8000/config/custom.yaml
 curl -X DELETE http://<IP>:8000/config/custom.yaml
 ```
 
-### ✅ Create Dataset
+### ✅ Create Dataset (from MongoDB site)
 ```bash
 curl -X POST http://<IP>:8000/dataset \
   -H "Content-Type: application/json" \
   -d '{
     "name": "dataset1",
-    "schema": { ...schema contents... }
+    "site_id": "living_lab",
+    "config": {
+      "parameter1": "value1",
+      "parameter2": 42
+    },
+    "from_ts": "2023-01-01T00:00:00Z",
+    "until_ts": "2023-12-31T23:59:59Z"
 }'
 ```
 
 ### 📃 List Datasets
 ```bash
 curl http://<IP>:8000/datasets
+```
+
+### ❌ Delete Dataset
+```bash
+curl -X DELETE http://<IP>:8000/dataset/dataset1
 ```
 
 ### ❌ Delete Job (and its folder)
@@ -310,14 +324,19 @@ curl -X DELETE http://<IP>:8000/job/{job_id}
 
 ## 📰 MongoDB Endpoints Usage Examples
 
-### ✅ Retrieve iCharging Headquarters data
+### ✅ List all available MongoDB sites (databases)
 ```bash
-curl http://<IP>:8000/api/icharging-headquarters
+curl http://<IP>:8000/sites
 ```
 
-### ✅ Retrieve all Living Lab data
+### ✅ Retrieve all real-time data from a specific site (e.g., iCharging Headquarters)
 ```bash
-curl http://<IP>:8000/api/living-lab
+curl http://<IP>:8000/real-time-data/i-charging_headquarters
+```
+
+### ✅ Retrieve only the last 60 minutes of data from a specific site
+```bash
+curl "http://<IP>:8000/real-time-data/living_lab?minutes=60"
 ```
 
 ---

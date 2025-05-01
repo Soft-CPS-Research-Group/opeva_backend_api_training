@@ -5,3 +5,5 @@ PyYAML==6.0.2
 uvicorn
 pymongo
 pydantic-settings==2.2.1
+python-dotenv
+pyyaml
