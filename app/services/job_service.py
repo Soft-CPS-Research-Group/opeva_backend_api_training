@@ -6,6 +6,7 @@ from uuid import uuid4
 from app.models.job import SimulationRequest, JobLaunchRequest
 from app.utils import docker_manager, job_utils, file_utils
 from app.config import settings
+from fastapi import HTTPException
 
 jobs = job_utils.load_jobs()
 
