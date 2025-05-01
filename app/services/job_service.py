@@ -4,8 +4,8 @@ import yaml
 import json
 from uuid import uuid4
 from app.models.job import SimulationRequest, JobLaunchRequest
-from app.utils import docker_manager, job_utils, file_utils
-from app.config import CONFIGS_DIR
+from app.utils.utils import docker_manager, job_utils, file_utils
+from app.config import settings
 
 jobs = job_utils.load_jobs()
 
@@ -13,7 +13,7 @@ async def launch_simulation(request: JobLaunchRequest):
     job_id = str(uuid4())
     if request.config_path:
         config_path = request.config_path
-        with open(os.path.join(CONFIGS_DIR, config_path)) as f:
+        with open(os.path.join(settings.CONFIGS_DIR, config_path)) as f:
             config = yaml.safe_load(f)
     elif request.config:
         file_name = request.save_as or f"{job_id}.yaml"
