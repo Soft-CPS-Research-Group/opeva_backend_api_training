@@ -1,7 +1,7 @@
 import os, json, yaml, base64
 from app.config import settings
 from app.utils import mongo_utils
-import datetime
+from datetime import datetime
 import shutil
 
 def save_config_dict(config: dict, file_name: str) -> str:
