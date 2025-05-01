@@ -302,8 +302,8 @@ curl -X POST http://<IP>:8000/dataset \
       "parameter1": "value1",
       "parameter2": 42
     },
-    "from_ts": "2023-01-01T00:00:00Z",
-    "until_ts": "2023-12-31T23:59:59Z"
+    "from_ts": "2023-01-01 00:00:00",
+    "until_ts": "2023-01-01 00:00:00"
 }'
 ```
 

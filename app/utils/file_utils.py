@@ -52,9 +52,12 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
     building_collections = [c for c in collection_names if c.startswith("building_")]
     ev_collections = [c for c in collection_names if c.startswith("ev_")]
 
+    def parse_timestamp(ts: str) -> datetime:
+        return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+
     #Pode existir ou não. Se existir, converte para datetime. Se não existir, ignora e tras tudo
-    from_dt = datetime.fromisoformat(from_ts.replace("Z", "")) if from_ts else None
-    until_dt = datetime.fromisoformat(until_ts.replace("Z", "")) if until_ts else None
+    from_dt = parse_timestamp(from_ts) if from_ts else None
+    until_dt = parse_timestamp(until_ts) if until_ts else None
 
     #Aqui é para criar os csvs. Se o timestamp não existir, ignora e tras tudo. Se existir, ignora os que estão fora do range
     #Acho que o ideal era fazer um filtro na query, mas assim é mais simples. Se houver muitos dados, pode ser mais lento
