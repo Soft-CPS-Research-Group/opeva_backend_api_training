@@ -118,4 +118,4 @@ def get_file_logs(job_id: str):
     raise HTTPException(status_code=404, detail="Log file not found in logs folder")
 
 def get_hosts():
-    return {"available_hosts": file_utils.get_available_hosts()}
+    return {"available_hosts": settings.AVAILABLE_HOSTS}
