@@ -51,6 +51,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
     #Ve melhor daqui para baixo. Aqui a idea é ir buscar as collections e ir buscar separadamente buildings e evs. Mas os nomes nao estao assim
     building_collections = [c for c in collection_names if c.startswith("building_")]
     ev_collections = [c for c in collection_names if c.startswith("ev_")]
+    price_collections = [c for c in collection_names if c.startswith("price_")]
 
     def parse_timestamp(ts: str) -> datetime:
         return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
@@ -75,7 +76,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
             filtered_data.append(doc)
 
         with open(os.path.join(path, f"{collection_name}.csv"), "w") as f:
-            f.write(",".join(settings.DATASET_CSV_HEADER) + "\n")
+            f.write(",".join(settings.BUILDING_DATASET_CSV_HEADER) + "\n")
             for doc in filtered_data:
                 row = [
                     doc.get("timestamp", ""),
@@ -90,6 +91,9 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
         write_csv(col, list(db[col].find({})))
 
     for col in ev_collections:
+        write_csv(col, list(db[col].find({})))
+
+    for col in price_collections:
         write_csv(col, list(db[col].find({})))
 
     # Fetch the structure from the special "schema" collection
