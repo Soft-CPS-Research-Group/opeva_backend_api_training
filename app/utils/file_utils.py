@@ -48,8 +48,17 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
     db = mongo_utils.get_db(site_id)
     collection_names = db.list_collection_names()
 
-    #Ve melhor daqui para baixo. Aqui a idea é ir buscar as collections e ir buscar separadamente buildings e evs. Mas os nomes nao estao assim
-    building_collections = [c for c in collection_names if c.startswith("building_")]
+    # Fetch the structure from the special "schema" collection
+    structure_doc = db["schema"].find_one()
+    if not structure_doc:
+        raise ValueError(f"Missing 'schema' collection in site '{site_id}'")
+
+    # Saves the buildings ids present in the schema for future data fetch
+    building_ids = list(structure_doc.keys())
+
+    # Find collections that start with 'building_' followed by each building_id
+    # Depois tenho de alterar isto pada incluir o prefixo mas primeiro tenho de alterar do lado do Percepta
+    building_collections = [c for c in collection_names if any(c.startswith(building_id) for building_id in building_ids)]
     ev_collections = [c for c in collection_names if c.startswith("ev_")]
     price_collections = [c for c in collection_names if c.startswith("price_")]
 
@@ -62,7 +71,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
 
     #Aqui é para criar os csvs. Se o timestamp não existir, ignora e tras tudo. Se existir, ignora os que estão fora do range
     #Acho que o ideal era fazer um filtro na query, mas assim é mais simples. Se houver muitos dados, pode ser mais lento
-    def write_csv(collection_name, data):
+    def write_csv(collection_name, data, header):
         filtered_data = []
         for doc in data:
             ts = doc.get("timestamp")
@@ -76,30 +85,43 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
             filtered_data.append(doc)
 
         with open(os.path.join(path, f"{collection_name}.csv"), "w") as f:
-            f.write(",".join(settings.BUILDING_DATASET_CSV_HEADER) + "\n")
+            # Write the original header (unchanged)
+            f.write(",".join(header) + "\n")
+
             for doc in filtered_data:
-                row = [
-                    doc.get("timestamp", ""),
-                    doc.get("power_consumption", ""),
-                    doc.get("solar_generation", ""),
-                    doc.get("ev_charge", ""),
-                    doc.get("battery_state", "")
-                ]
-                f.write(",".join(map(str, row)) + "\n")
+                ts = doc.get("timestamp")
+                ts_data = {}
+
+                # Prepare timestamp-derived fields only if needed
+                if "timestamp" in header and ts:
+                    dt = datetime.fromtimestamp(ts, pytz.UTC)
+                    ts_data = {
+                        "month": dt.month,
+                        "hour": dt.hour,
+                        "minutes": dt.minute,
+                        "day_type": dt.weekday(),
+                        "daylight_savings_status": int(bool(dt.dst()))
+                    }
+
+                row = []
+                for field in header:
+                    if field == "timestamp":
+                        # Replace "timestamp" value with its components
+                        row.extend(str(ts_data.get(subfield, "")) for subfield in TIMESTAMP_FIELDS)
+                    else:
+                        row.append(str(doc.get(field, "")))
+
+                # Write the row to the file
+                f.write(",".join(row) + "\n")
 
     for col in building_collections:
-        write_csv(col, list(db[col].find({})))
+        write_csv(col, list(db[col].find({})), settings.BUILDING_DATASET_CSV_HEADER)
 
     for col in ev_collections:
-        write_csv(col, list(db[col].find({})))
+        write_csv(col, list(db[col].find({})), settings.EV_DATASET_CSV_HEADER)
 
     for col in price_collections:
-        write_csv(col, list(db[col].find({})))
-
-    # Fetch the structure from the special "schema" collection
-    structure_doc = db["schema"].find_one()
-    if not structure_doc:
-        raise ValueError(f"Missing 'schema' collection in site '{site_id}'")
+        write_csv(col, list(db[col].find({})), settings.PRICE_DATASET_CSV_HEADER)
 
     # Remove MongoDB _id if present
     structure_doc.pop("_id", None)
