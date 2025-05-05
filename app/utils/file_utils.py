@@ -57,8 +57,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
         raise ValueError(f"Missing 'schema' collection in site '{site_id}'")
 
     # Saves the buildings ids present in the schema for future data fetch
-    building_ids = list(structure_doc.keys())
-
+    building_ids = list(structure_doc.get("building_ids").keys())
     # Find collections that start with 'building_' followed by each building_id
     # Depois tenho de alterar isto pada incluir o prefixo mas primeiro tenho de alterar do lado do Percepta
     print(building_ids)
