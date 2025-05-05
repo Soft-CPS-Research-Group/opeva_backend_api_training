@@ -61,6 +61,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
 
     # Find collections that start with 'building_' followed by each building_id
     # Depois tenho de alterar isto pada incluir o prefixo mas primeiro tenho de alterar do lado do Percepta
+    print(building_ids)
     building_collections = [c for c in collection_names if any(c.startswith(building_id) for building_id in building_ids)]
     ev_collections = [c for c in collection_names if c.startswith("ev_")]
     price_collections = [c for c in collection_names if c.startswith("price_")]
