@@ -2,7 +2,6 @@ import os, json, yaml, base64
 from app.config import settings
 from app.utils import mongo_utils
 from datetime import datetime
-import pytz
 import shutil
 import logging
 
@@ -98,7 +97,10 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
 
                 # Prepare timestamp-derived fields only if needed
                 if "timestamp" in header and ts:
-                    dt = datetime.fromtimestamp(ts, pytz.UTC)
+
+                    if not isinstance(ts, datetime):
+                        ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
                     ts_data = {
                         "month": dt.month,
                         "hour": dt.hour,
