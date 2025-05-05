@@ -4,7 +4,7 @@ from typing import Optional
 
 router = APIRouter()
 
-@router.post("/dataset")
+@router.post("/datast")
 async def create_dataset(
     name: str = Body(...),
     site_id: str = Body(...),
