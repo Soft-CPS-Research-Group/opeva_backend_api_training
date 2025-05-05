@@ -61,7 +61,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
     building_collections = [c for c in collection_names if any(c.startswith(building_id) for building_id in building_ids)]
     ev_collections = [c for c in collection_names if c.startswith("ev_")]
     price_collections = [c for c in collection_names if c.startswith("price_")]
-    print(building_collections)
+    print(f'A criar dataset... {building_collections}', flush=True)
     def parse_timestamp(ts: str) -> datetime:
         return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
 
