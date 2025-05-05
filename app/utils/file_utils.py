@@ -3,6 +3,9 @@ from app.config import settings
 from app.utils import mongo_utils
 from datetime import datetime
 import shutil
+import logging
+
+logger = logging.getLogger("uvicorn")
 
 def save_config_dict(config: dict, file_name: str) -> str:
     full_path = os.path.join(settings.CONFIGS_DIR, file_name)
@@ -61,7 +64,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
     building_collections = [c for c in collection_names if any(c.startswith(building_id) for building_id in building_ids)]
     ev_collections = [c for c in collection_names if c.startswith("ev_")]
     price_collections = [c for c in collection_names if c.startswith("price_")]
-    print(f'A criar dataset... {building_collections}', flush=True)
+    logger.info(f'A criar dataset... {building_collections}')
     def parse_timestamp(ts: str) -> datetime:
         return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
 
