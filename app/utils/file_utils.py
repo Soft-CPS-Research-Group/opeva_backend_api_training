@@ -102,11 +102,11 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
                         ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
                     ts_data = {
-                        "month": dt.month,
-                        "hour": dt.hour,
-                        "minutes": dt.minute,
-                        "day_type": dt.weekday(),
-                        "daylight_savings_status": int(bool(dt.dst()))
+                        "month": ts.month,
+                        "hour": ts.hour,
+                        "minutes": ts.minute,
+                        "day_type": ts.weekday(),
+                        "daylight_savings_status": int(bool(ts.dst()))
                     }
 
                 row = []
