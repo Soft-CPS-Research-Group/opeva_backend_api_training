@@ -7,3 +7,5 @@ pymongo
 pydantic-settings==2.2.1
 python-dotenv
 pyyaml
+numpy
+pandas
