@@ -1,7 +1,7 @@
 from app.utils import file_utils
 
-def create_dataset(name: str, site_id: str, citylearn_configs: dict, from_ts: str = None, until_ts: str = None):
-    file_utils.create_dataset_dir(name, site_id, citylearn_configs, from_ts, until_ts)
+def create_dataset(name: str, site_id: str, citylearn_configs: dict, period : int = 60, from_ts: str = None, until_ts: str = None):
+    file_utils.create_dataset_dir(name, site_id, citylearn_configs, period, from_ts, until_ts)
     return {"message": "Dataset created", "name": name}
 
 def list_datasets():

@@ -9,10 +9,11 @@ async def create_dataset(
     name: str = Body(...),
     site_id: str = Body(...),
     citylearn_configs: dict = Body(...),
+    period : Optional[int] = Body(60),
     from_ts: Optional[str] = Body(None),
     until_ts: Optional[str] = Body(None)
 ):
-    return dataset_controller.create_dataset(name, site_id, citylearn_configs, from_ts, until_ts)
+    return dataset_controller.create_dataset(name, site_id, citylearn_configs, period, from_ts, until_ts)
 
 @router.get("/datasets")
 async def list_datasets():
