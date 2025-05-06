@@ -237,7 +237,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             query["timestamp"]["$lte"] = until_dt
         else:
             query["timestamp"] = {"$lte": until_dt + timedelta(minutes=period)}
-
+    print(query)
     # Export all building-related collections
     for col in building_collections:
         write_csv(list(db["R-H-01"].find(query)), settings.BUILDING_DATASET_CSV_HEADER, col)
