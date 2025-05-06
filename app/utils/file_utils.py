@@ -113,7 +113,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
                 for field in header:
                     if field == "timestamp":
                         # Replace "timestamp" value with its components
-                        row.extend(str(ts_data.get(subfield, "")) for subfield in ts)
+                        row.extend(str(ts_data.get(subfield, "")) for subfield in ts_data)
                     else:
                         row.append(str(doc.get(field, "")))
 
