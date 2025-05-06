@@ -96,8 +96,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
         # Check if the columns that need to be aggregated exist in the DataFrame
         existing_columns = [col for col in aggregation_rules if col in raw_data.columns]
-        existing_columns.append('timestamp')
-
+        print(existing_columns)
         # Resample and aggregate the data using the specified aggregation rules per column
         # Example of aggregation_rules: {'temperature': 'mean', 'load': 'sum'}
         aggregated_data = raw_data[existing_columns].resample(f'{period}min').agg(aggregation_rules)
