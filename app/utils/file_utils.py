@@ -45,7 +45,7 @@ def read_progress(job_id):
             return json.load(f)
     return {"progress": "No updates yet."}
 
-def create_dataset_dir(name: str, site_id: str, config: dict, period: Integer = 60, from_ts: str = None, until_ts: str = None):
+def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, from_ts: str = None, until_ts: str = None):
     # Utility function to convert timestamp strings to datetime objects
     def parse_timestamp(ts: str) -> datetime:
         return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
