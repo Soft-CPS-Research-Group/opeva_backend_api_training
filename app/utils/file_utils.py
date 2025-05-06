@@ -223,8 +223,11 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         if any(field in header for field in settings.TIMESTAMP_DATASET_CSV_HEADER):
             is_timestamp_present = True
 
-        print(data_format(docs, header))
+        teste = data_format(docs, header)
+        teste_filtered = teste[~teste['timestamp'].isin([pd.Timestamp('2025-04-18 19:00:00+00:00'),
+                                                     pd.Timestamp('2025-04-18 20:00:00+00:00')])]
 
+        print(interpolate_missing_values(teste_filtered))
 
 
 
