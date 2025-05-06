@@ -5,8 +5,6 @@ from datetime import datetime
 import shutil
 import logging
 
-logger = logging.getLogger("uvicorn")
-
 def save_config_dict(config: dict, file_name: str) -> str:
     full_path = os.path.join(settings.CONFIGS_DIR, file_name)
     with open(full_path, "w") as f:
@@ -58,19 +56,25 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
 
     # Saves the buildings ids present in the schema for future data fetch
     building_ids = list(structure_doc.get("buildings").keys())
+    # ADICIONAR AQUI DOS CARROS
+
     # Find collections that start with 'building_' followed by each building_id
     # Depois tenho de alterar isto pada incluir o prefixo mas primeiro tenho de alterar do lado do Percepta
-    print(building_ids)
     building_collections = [c for c in collection_names if any(c.startswith(building_id) for building_id in building_ids)]
     ev_collections = [c for c in collection_names if c.startswith("ev_")]
     price_collections = [c for c in collection_names if c.startswith("price_")]
-    logger.info(f'A criar dataset... {building_collections}')
+
     def parse_timestamp(ts: str) -> datetime:
         return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
 
     #Pode existir ou não. Se existir, converte para datetime. Se não existir, ignora e tras tudo
     from_dt = parse_timestamp(from_ts) if from_ts else None
     until_dt = parse_timestamp(until_ts) if until_ts else None
+
+    is_timestamp_present = False
+
+    if any(field in header for field in settings.TIMESTAMP_DATASET_CSV_HEADER):
+        is_timestamp_present = True
 
     #Aqui é para criar os csvs. Se o timestamp não existir, ignora e tras tudo. Se existir, ignora os que estão fora do range
     #Acho que o ideal era fazer um filtro na query, mas assim é mais simples. Se houver muitos dados, pode ser mais lento
@@ -96,7 +100,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
                 ts_data = {}
 
                 # Prepare timestamp-derived fields only if needed
-                if "timestamp" in header and ts:
+                if is_timestamp_present and ts:
 
                     if not isinstance(ts, datetime):
                         ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -111,9 +115,9 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
 
                 row = []
                 for field in header:
-                    if field == "timestamp":
+                    if field in ts_data:
                         # Replace "timestamp" value with its components
-                        row.extend(str(ts_data.get(subfield, "")) for subfield in ts_data)
+                        row.extend(str(ts_data.get(subfield, "")))
                     else:
                         row.append(str(doc.get(field, "")))
 

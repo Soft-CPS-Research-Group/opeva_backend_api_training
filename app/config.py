@@ -23,9 +23,12 @@ class Settings(BaseSettings):
     MONGO_AUTH_SOURCE: str = "admin"
 
     BUILDING_DATASET_CSV_HEADER: ClassVar[list[str]] = [
-        "timestamp", "indoor_dry_bulb_temperature", "average_unmet_cooling_setpoint_difference",
+        "month", "hour", "minutes","day_type", "daylight_savings_status", "indoor_dry_bulb_temperature", "average_unmet_cooling_setpoint_difference",
         "indoor_relative_humidity", "non_shiftable_load", "dhw_demand", "cooling_demand",
         "heating_demand", "solar_generation"
+    ]
+    TIMESTAMP_DATASET_CSV_HEADER: ClassVar[list[str]] = [
+        "month", "hour", "minutes", "day_type", "daylight_savings_status"
     ]
 
     EV_DATASET_CSV_HEADER: ClassVar[list[str]] = [
