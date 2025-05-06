@@ -3,6 +3,8 @@ from app.config import settings
 from app.utils import mongo_utils
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+import numpy as np
+import pandas as pd
 import shutil
 import logging
 
@@ -43,10 +45,16 @@ def read_progress(job_id):
             return json.load(f)
     return {"progress": "No updates yet."}
 
-def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = None, until_ts: str = None):
+def create_dataset_dir(name: str, site_id: str, config: dict, period: Integer = 60, from_ts: str = None, until_ts: str = None):
+    # Utility function to convert timestamp strings to datetime objects
+    def parse_timestamp(ts: str) -> datetime:
+        return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+    # Create the target dataset directory
     path = os.path.join(settings.DATASETS_DIR, name)
     os.makedirs(path, exist_ok=True)
 
+    # Connect to the MongoDB database for the given site
     db = mongo_utils.get_db(site_id)
     collection_names = db.list_collection_names()
 
@@ -57,25 +65,164 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
 
     # Saves the buildings ids present in the schema for future data fetch
     building_ids = list(structure_doc.get("buildings").keys())
-    # ADICIONAR AQUI DOS CARROS
+
+    # TODO: Add EV (electric vehicle) structure here
 
     # Find collections that start with 'building_' followed by each building_id
-    # Depois tenho de alterar isto pada incluir o prefixo mas primeiro tenho de alterar do lado do Percepta
-    building_collections = [c for c in collection_names if any(c.startswith(building_id) for building_id in building_ids)]
+    # TODO: This logic will be updated later to use a specific prefix once Percepta side is updated
+    building_collections = [c for c in collection_names if
+                            any(c.startswith(building_id) for building_id in building_ids)]
     ev_collections = [c for c in collection_names if c.startswith("ev_")]
-    price_collections = [c for c in collection_names if c.startswith("price_")]
+    price_collection = building_collections[0]
 
-    def parse_timestamp(ts: str) -> datetime:
-        return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    # Parse timestamp range if provided
+    from_dt = parse_timestamp(from_ts) if from_ts else None
+    until_dt = parse_timestamp(until_ts) if until_ts else None
 
+    # Utility function to determine if a datetime is in daylight savings time (Lisbon time zone)
     def is_daylight_savings(ts: datetime) -> int:
         ts_portugal = ts.astimezone(ZoneInfo("Europe/Lisbon"))
         return int(bool(ts_portugal.dst()))
 
-    #Pode existir ou não. Se existir, converte para datetime. Se não existir, ignora e tras tudo
-    from_dt = parse_timestamp(from_ts) if from_ts else None
-    until_dt = parse_timestamp(until_ts) if until_ts else None
+    def data_format(mongo_docs, aggregation_rules):
+        # Convert the raw MongoDB documents (list of dicts) into a DataFrame
+        raw_data = pd.DataFrame(mongo_docs)
 
+        # Ensure the 'timestamp' column is in datetime format with UTC timezone
+        raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'], utc=True)
+
+        # Set 'timestamp' as the index to allow time-based resampling
+        raw_data.set_index('timestamp', inplace=True)
+
+        # Resample and aggregate the data using the specified aggregation rules per column
+        # Example of aggregation_rules: {'temperature': 'mean', 'load': 'sum'}
+        aggregated_data = raw_data.resample(f'{period}min').agg(aggregation_rules)
+
+        # Create a full timestamp range to ensure completeness of the time series
+        full_datetime_index = pd.date_range(start=from_dt, end=until_dt, freq=f'{period}min', tz='UTC')
+        df_full = pd.DataFrame(full_datetime_index, columns=['timestamp'])
+
+        # Merge the aggregated data with the full time range to fill any gaps
+        df_complete = df_full.merge(aggregated_data, on='timestamp', how='outer')
+
+        # Set 'timestamp' back as index and sort for chronological order
+        df_complete.set_index('timestamp', inplace=True)
+        df_complete.sort_index(inplace=True)
+
+        # Return the fully aligned and aggregated DataFrame
+        return df_complete
+
+    def interpolate_missing_values(df):
+        data = {}  # Dictionary to store interpolated values for all columns
+        indexs = []  # List to store indices of missing values
+        x = 0  # Counter for consecutive missing values
+
+        # Iterate over all rows in the DataFrame
+        for i in range(len(df) + 1):
+            if i != len(df):
+                # For each row, add the values of all columns to the 'data' dictionary
+                data[df.index[i]] = df.iloc[i].to_dict()
+
+            # Check if any value in the row is NaN
+            if i != len(df) and df.iloc[i].isnull().any():
+                # If any value is missing, increment the counter and store the index
+                x += 1
+                indexs.append(df.index[i])
+            elif x > 0:
+                # If there were missing values, interpolate the values
+                # TODO alterar o valor de 6 para um valor que é okay fazer interpolação considerando o periodo
+                if x <= 6 and (indexs[0] - pd.Timedelta(hours=1)) in df.index and (
+                        indexs[-1] + pd.Timedelta(hours=1)) in df.index:
+                    # If the gap is small and there are valid values before and after
+                    prev_values = df.loc[indexs[0] - pd.Timedelta(hours=1)].to_dict()  # Get the previous values
+                    next_values = df.loc[indexs[-1] + pd.Timedelta(hours=1)].to_dict()  # Get the next values
+
+                    # Perform linear interpolation for each column
+                    # Considering the design of Percepta, if a column has NaN values, it indicates that Percepta did not record any data for that specific timestamp.
+                    # # Therefore, when a value is NaN, it means no data was captured for that timestamp across all columns.
+                    for col in df.columns:
+                        values = np.linspace(prev_values[col], next_values[col], x + 2)
+
+                        for j in range(x):
+                            data[indexs[j]][col] = values[
+                                j + 1]  # Assign interpolated values to the corresponding index
+
+                else:
+                    # If the gap is large, handle it by grouping by hour and applying specific logic
+                    days_and_hours = {}
+                    for j in range(x):
+                        hour = indexs[j].hour
+                        # Group missing indices by hour
+                        if hour in days_and_hours:
+                            days_and_hours[hour].append(indexs[j])
+                            days_and_hours[hour] = sorted(days_and_hours[hour], key=lambda item: item.time())
+                        else:
+                            days_and_hours[hour] = [indexs[j]]
+
+                    # Perform verification for each hour group
+                    for hour in days_and_hours:
+                        days = len(days_and_hours[hour])  # Number of missing entries in this hour
+                        f_date = days_and_hours[hour][0]  # First date in the hour group
+                        l_date = days_and_hours[hour][-1]  # Last date in the hour group
+                        ver = Translator.div_verification(f_date, l_date, days, df)
+
+                        # Assign verified values to the corresponding indices
+                        for i in range(len(ver)):
+                            data[days_and_hours[hour][i]] = ver[i]
+
+                # Reset the counter and index list for the next batch of missing values
+                x = 0
+                indexs = []
+
+        docs = [
+            {'timestamp': ts, **row}
+            for ts, row in sorted(data.items(), key=lambda x: x[0])
+        ]
+        return docs
+
+    def general_format(doc, is_timestamp_present):
+        ts = doc.get("timestamp")
+        ts_data = {}
+
+        # Prepare timestamp-derived fields only if needed
+        if is_timestamp_present and ts:
+
+            if not isinstance(ts, datetime):
+                ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+            ts_data = {
+                "month": ts.month,
+                "hour": ts.hour,
+                "minutes": ts.minute,
+                "day_type": ts.weekday(),
+                "daylight_savings_status": is_daylight_savings(ts)
+            }
+
+        # Construct a CSV row
+        row = []
+        for field in header:
+            if field in ts_data:
+                # Replace "timestamp" value with its components
+                row.append(str(ts_data.get(field, "")))
+            else:
+                row.append(str(doc.get(field, "")))
+
+        return row
+
+    # Function to export data from a collection into a CSV file
+    def write_csv(docs, header, file_name):
+        is_timestamp_present = False
+
+        # Check if timestamp-derived fields are needed
+        if any(field in header for field in settings.TIMESTAMP_DATASET_CSV_HEADER):
+            is_timestamp_present = True
+
+        print(data_format(docs, header))
+
+
+
+
+    # Build MongoDB query for the time range
     query = {}
     if from_dt:
         query["timestamp"] = {"$gte": from_dt}
@@ -85,75 +232,23 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
         else:
             query["timestamp"] = {"$lte": until_dt}
 
-    #Aqui é para criar os csvs. Se o timestamp não existir, ignora e tras tudo. Se existir, ignora os que estão fora do range
-    #Acho que o ideal era fazer um filtro na query, mas assim é mais simples. Se houver muitos dados, pode ser mais lento
-    def write_csv(collection_name, header):
-        cursor = db[collection_name].find(query)
-
-        is_timestamp_present = False
-
-        if any(field in header for field in settings.TIMESTAMP_DATASET_CSV_HEADER):
-            is_timestamp_present = True
-
-        '''for doc in data:
-            ts = doc.get("timestamp")
-            if ts:
-                try:
-                    print(ts)
-                    print(from_dt)
-                    print(until_dt)
-
-                    if (from_dt and ts < from_dt) or (until_dt and ts > until_dt):
-                        continue
-                except Exception:
-                    pass
-            filtered_data.append(doc)'''
-
-        with open(os.path.join(path, f"{collection_name}.csv"), "w") as f:
-            # Write the original header (unchanged)
-            f.write(",".join(header) + "\n")
-
-            for doc in cursor:
-                ts = doc.get("timestamp")
-                ts_data = {}
-
-                # Prepare timestamp-derived fields only if needed
-                if is_timestamp_present and ts:
-
-                    if not isinstance(ts, datetime):
-                        ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-
-                    ts_data = {
-                        "month": ts.month,
-                        "hour": ts.hour,
-                        "minutes": ts.minute,
-                        "day_type": ts.weekday(),
-                        "daylight_savings_status": is_daylight_savings(ts)
-                    }
-
-                row = []
-                for field in header:
-                    if field in ts_data:
-                        # Replace "timestamp" value with its components
-                        row.append(str(ts_data.get(field, "")))
-                    else:
-                        row.append(str(doc.get(field, "")))
-
-                # Write the row to the file
-                f.write(",".join(row) + "\n")
-
+    # Export all building-related collections
     for col in building_collections:
-        write_csv(col, settings.BUILDING_DATASET_CSV_HEADER)
+        write_csv(list(db["R-H-01"].find(query)), settings.BUILDING_DATASET_CSV_HEADER, col)
 
-    for col in ev_collections:
-        write_csv(col, settings.EV_DATASET_CSV_HEADER)
+    # Export all EV-related collections
+    ''' for col in ev_collections:
+        write_csv(list(db[col].find(query)), settings.EV_DATASET_CSV_HEADER, col)
 
-    for col in price_collections:
-        write_csv(col, settings.PRICE_DATASET_CSV_HEADER)
+    if "timestamp" in query and "$lte" in query["timestamp"]:
+        query["timestamp"]["$lte"] += timedelta(days=1)
 
+    write_csv(list(db[price_collection].find(query)), settings.PRICE_DATASET_CSV_HEADER, "pricing")
+'''
     # Remove MongoDB _id if present
     structure_doc.pop("_id", None)
 
+    # Combine the configuration with the structure and write to JSON
     schema = {
         **config,
         "structure": structure_doc
