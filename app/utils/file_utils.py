@@ -76,17 +76,26 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
     from_dt = parse_timestamp(from_ts) if from_ts else None
     until_dt = parse_timestamp(until_ts) if until_ts else None
 
+    query = {}
+    if from_dt:
+        query["timestamp"] = {"$gte": from_dt}
+    if until_dt:
+        if "timestamp" in query:
+            query["timestamp"]["$lte"] = until_dt
+        else:
+            query["timestamp"] = {"$lte": until_dt}
+
     #Aqui é para criar os csvs. Se o timestamp não existir, ignora e tras tudo. Se existir, ignora os que estão fora do range
     #Acho que o ideal era fazer um filtro na query, mas assim é mais simples. Se houver muitos dados, pode ser mais lento
-    def write_csv(collection_name, data, header):
-        filtered_data = []
+    def write_csv(collection_name, header):
+        cursor = db[collection_name].find(query)
 
         is_timestamp_present = False
 
         if any(field in header for field in settings.TIMESTAMP_DATASET_CSV_HEADER):
             is_timestamp_present = True
 
-        for doc in data:
+        '''for doc in data:
             ts = doc.get("timestamp")
             if ts:
                 try:
@@ -98,13 +107,13 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
                         continue
                 except Exception:
                     pass
-            filtered_data.append(doc)
+            filtered_data.append(doc)'''
 
         with open(os.path.join(path, f"{collection_name}.csv"), "w") as f:
             # Write the original header (unchanged)
             f.write(",".join(header) + "\n")
 
-            for doc in filtered_data:
+            for doc in cursor:
                 ts = doc.get("timestamp")
                 ts_data = {}
 
@@ -134,13 +143,13 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
                 f.write(",".join(row) + "\n")
 
     for col in building_collections:
-        write_csv(col, list(db[col].find({})), settings.BUILDING_DATASET_CSV_HEADER)
+        write_csv(col, settings.BUILDING_DATASET_CSV_HEADER)
 
     for col in ev_collections:
-        write_csv(col, list(db[col].find({})), settings.EV_DATASET_CSV_HEADER)
+        write_csv(col, settings.EV_DATASET_CSV_HEADER)
 
     for col in price_collections:
-        write_csv(col, list(db[col].find({})), settings.PRICE_DATASET_CSV_HEADER)
+        write_csv(col, settings.PRICE_DATASET_CSV_HEADER)
 
     # Remove MongoDB _id if present
     structure_doc.pop("_id", None)
