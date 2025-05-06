@@ -71,15 +71,16 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
     from_dt = parse_timestamp(from_ts) if from_ts else None
     until_dt = parse_timestamp(until_ts) if until_ts else None
 
-    is_timestamp_present = False
-
-    if any(field in header for field in settings.TIMESTAMP_DATASET_CSV_HEADER):
-        is_timestamp_present = True
-
     #Aqui é para criar os csvs. Se o timestamp não existir, ignora e tras tudo. Se existir, ignora os que estão fora do range
     #Acho que o ideal era fazer um filtro na query, mas assim é mais simples. Se houver muitos dados, pode ser mais lento
     def write_csv(collection_name, data, header):
         filtered_data = []
+
+        is_timestamp_present = False
+
+        if any(field in header for field in settings.TIMESTAMP_DATASET_CSV_HEADER):
+            is_timestamp_present = True
+
         for doc in data:
             ts = doc.get("timestamp")
             if ts:
