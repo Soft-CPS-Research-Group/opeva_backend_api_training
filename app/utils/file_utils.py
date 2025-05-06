@@ -90,7 +90,10 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
             ts = doc.get("timestamp")
             if ts:
                 try:
-                    #ts_dt = datetime.fromisoformat(ts.replace("Z", ""))
+                    print(ts)
+                    print(from_dt)
+                    print(until_dt)
+
                     if (from_dt and ts < from_dt) or (until_dt and ts > until_dt):
                         continue
                 except Exception:
