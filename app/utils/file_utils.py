@@ -1,7 +1,8 @@
 import os, json, yaml, base64
 from app.config import settings
 from app.utils import mongo_utils
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import shutil
 import logging
 
@@ -65,7 +66,11 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
     price_collections = [c for c in collection_names if c.startswith("price_")]
 
     def parse_timestamp(ts: str) -> datetime:
-        return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+    def is_daylight_savings(ts: datetime) -> int:
+        ts_portugal = ts.astimezone(ZoneInfo("Europe/Lisbon"))
+        return int(bool(ts_portugal.dst()))
 
     #Pode existir ou não. Se existir, converte para datetime. Se não existir, ignora e tras tudo
     from_dt = parse_timestamp(from_ts) if from_ts else None
@@ -85,7 +90,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
             ts = doc.get("timestamp")
             if ts:
                 try:
-                    ts_dt = datetime.fromisoformat(ts.replace("Z", ""))
+                    #ts_dt = datetime.fromisoformat(ts.replace("Z", ""))
                     if (from_dt and ts_dt < from_dt) or (until_dt and ts_dt > until_dt):
                         continue
                 except Exception:
@@ -111,7 +116,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
                         "hour": ts.hour,
                         "minutes": ts.minute,
                         "day_type": ts.weekday(),
-                        "daylight_savings_status": int(bool(ts.dst()))
+                        "daylight_savings_status": is_daylight_savings(ts)
                     }
 
                 row = []
