@@ -94,12 +94,15 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         # Set 'timestamp' as the index to allow time-based resampling
         raw_data.set_index('timestamp', inplace=True)
 
-        # Check if the columns that need to be aggregated exist in the DataFrame
-        existing_columns = [col for col in aggregation_rules if col in raw_data.columns]
-        print(existing_columns)
+        filtered_rules = {
+            col: rule
+            for col, rule in aggregation_rules.items()
+            if col in raw_data.columns and col not in settings.TIMESTAMP_DATASET_CSV_HEADER
+        }
+
         # Resample and aggregate the data using the specified aggregation rules per column
         # Example of aggregation_rules: {'temperature': 'mean', 'load': 'sum'}
-        aggregated_data = raw_data[existing_columns].resample(f'{period}min').agg(aggregation_rules)
+        aggregated_data = raw_data.resample(f'{period}min').agg(filtered_rules)
 
         # Create a full timestamp range to ensure completeness of the time series
         full_datetime_index = pd.date_range(start=from_dt, end=until_dt, freq=f'{period}min', tz='UTC')
