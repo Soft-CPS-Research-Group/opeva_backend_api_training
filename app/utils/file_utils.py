@@ -91,7 +91,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, from_ts: str = Non
             if ts:
                 try:
                     #ts_dt = datetime.fromisoformat(ts.replace("Z", ""))
-                    if (from_dt and ts_dt < from_dt) or (until_dt and ts_dt > until_dt):
+                    if (from_dt and ts < from_dt) or (until_dt and ts > until_dt):
                         continue
                 except Exception:
                     pass
