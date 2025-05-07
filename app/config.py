@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     ]
 
     PRICE_DATASET_CSV_HEADER: ClassVar[list[str]] = [
-        "timestamp", "power_consumption", "solar_generation", "ev_charge", "battery_state"
+        "energy_price"
     ]
 
     def mongo_uri(self, db_name: str) -> str:

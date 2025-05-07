@@ -180,11 +180,10 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 x = 0
                 indexs = []
 
-        docs = [
+        return [
             {'timestamp': ts, **row}
             for ts, row in sorted(data.items(), key=lambda x: x[0])
         ]
-        return docs
 
     def general_format(doc, is_timestamp_present):
         ts = doc.get("timestamp")
@@ -223,20 +222,31 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         if any(field in header for field in settings.TIMESTAMP_DATASET_CSV_HEADER):
             is_timestamp_present = True
 
-        teste = data_format(docs, header)
-        # Lista de datas para tornar os valores NaN
-        datas_para_nulos = [
-            pd.Timestamp('2025-04-18 19:00:00+00:00'),
-            pd.Timestamp('2025-04-18 20:00:00+00:00')
-        ]
+        # This step aggregates the data over the period specified as a parameter.
+        # The aggregation is performed based on the column labels, applying specific aggregation methods,
+        # such as summing all values or calculating the average, as defined in the provided aggregation rules.
+        data_aggregated = data_format(docs, header)
 
-        # Define os valores como NaN nessas datas
-        teste.loc[teste.index.isin(datas_para_nulos), ['solar_generation', 'non_shiftable_load']] = np.nan
+        # If there is missing data, in this step the data is filled in
+        data_missing_indices_filled = interpolate_missing_values(data_aggregated)
 
-        interpolated_docs = interpolate_missing_values(teste)
-        df = pd.DataFrame(interpolated_docs)
-        print(df)
+        with open(os.path.join(path, f"{file_name}.csv"), "w") as f:
+            # Write the CSV header
+            f.write(",".join(header) + "\n")
 
+            for doc in data_missing_indices_filled:
+                row = []
+                if header == settings.PRICE_DATASET_CSV_HEADER:
+                    row.append(doc.get("energy_price", 0))
+                    row.append(docs[i + 1].get("energy_price", 0) if i + 1 < len(docs) else 0)
+                    row.append(docs[i + 2].get("energy_price", 0) if i + 2 < len(docs) else 0)
+                    row.append(docs[i + 3].get("energy_price", 0) if i + 3 < len(docs) else 0)
+
+                else:
+                    row = general_format(doc, is_timestamp_present)
+
+                # Write the row to the file
+                f.write(",".join(row) + "\n")
 
 
     # Build MongoDB query for the time range
