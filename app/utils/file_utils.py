@@ -233,7 +233,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         # Define os valores como NaN nessas datas
         teste.loc[teste.index.isin(datas_para_nulos), ['solar_generation', 'non_shiftable_load']] = np.nan
 
-        interpolated_docs = interpolate_missing_values(teste_filtered)
+        interpolated_docs = interpolate_missing_values(teste)
         df = pd.DataFrame(interpolated_docs)
         print(df)
 
