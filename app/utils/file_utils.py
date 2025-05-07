@@ -224,10 +224,14 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             is_timestamp_present = True
 
         teste = data_format(docs, header)
-        teste_filtered = teste[~teste.index.isin([
+        # Lista de datas para tornar os valores NaN
+        datas_para_nulos = [
             pd.Timestamp('2025-04-18 19:00:00+00:00'),
             pd.Timestamp('2025-04-18 20:00:00+00:00')
-        ])]
+        ]
+
+        # Define os valores como NaN nessas datas
+        teste.loc[teste.index.isin(datas_para_nulos), ['solar_generation', 'non_shiftable_load']] = np.nan
 
         interpolated_docs = interpolate_missing_values(teste_filtered)
         df = pd.DataFrame(interpolated_docs)
