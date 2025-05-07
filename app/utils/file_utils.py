@@ -230,6 +230,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         # If there is missing data, in this step the data is filled in
         data_missing_indices_filled = interpolate_missing_values(data_aggregated)
 
+        i = 0
         with open(os.path.join(path, f"{file_name}.csv"), "w") as f:
             # Write the CSV header
             f.write(",".join(header) + "\n")
@@ -237,6 +238,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             for doc in data_missing_indices_filled:
                 row = []
                 if header == settings.PRICE_DATASET_CSV_HEADER:
+                    i+=1
                     row.append(doc.get("energy_price", 0))
                     row.append(docs[i + 1].get("energy_price", 0) if i + 1 < len(docs) else 0)
                     row.append(docs[i + 2].get("energy_price", 0) if i + 2 < len(docs) else 0)
