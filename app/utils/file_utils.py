@@ -185,7 +185,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             for ts, row in sorted(data.items(), key=lambda x: x[0])
         ]
 
-    def general_format(doc, is_timestamp_present):
+    def general_format(doc, is_timestamp_present, header):
         ts = doc.get("timestamp")
         ts_data = {}
 
@@ -243,7 +243,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                     row.append(docs[i + 3].get("energy_price", 0) if i + 3 < len(docs) else 0)
 
                 else:
-                    row = general_format(doc, is_timestamp_present)
+                    row = general_format(doc, is_timestamp_present, header)
 
                 # Write the row to the file
                 f.write(",".join(row) + "\n")
