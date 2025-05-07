@@ -248,7 +248,8 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                     row = general_format(doc, is_timestamp_present, header)
 
                 # Write the row to the file
-                f.write(",".join(row) + "\n")
+                f.write(",".join(map(str, row)) + "\n")
+
 
 
     # Build MongoDB query for the time range
