@@ -229,7 +229,9 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             pd.Timestamp('2025-04-18 20:00:00+00:00')
         ])]
 
-        print(interpolate_missing_values(teste_filtered))
+        interpolated_docs = interpolate_missing_values(teste_filtered)
+        df = pd.DataFrame(interpolated_docs)
+        print(df)
 
 
 
