@@ -118,6 +118,55 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         # Return the fully aligned and aggregated DataFrame
         return df_complete
 
+    def value(date, days, df, operation):
+        n_days = 0
+        x = 1
+        there_is_no_data = False
+        values = []
+        while n_days != days and not there_is_no_data:
+            if operation == 'sum':
+                new_date = date + pd.Timedelta(days=x)
+            else:
+                new_date = date - pd.Timedelta(days=x)
+
+            if new_date not in df.index:
+                there_is_no_data = True
+            elif not np.isnan(df.loc[new_date]['Value']):
+                values.append({'Date': new_date, 'Value': df.loc[new_date]['Value']})
+                n_days += 1
+            x += 1
+
+        return sorted(values, key=lambda item: item['Date'])
+
+    def div_verification(s_date, f_date, days, df):
+        div = days // 2
+        rest = days % 2
+        # values = Translator.value(sDate, div + rest, df, 'sub')
+        values = value(s_date, days, df, 'sub')
+        if len(values) >= div + rest:
+            values2 = value(f_date, div, df, 'sum')
+            if len(values2) == div:
+                values = values[-(div + rest):]
+                values.extend(values2)
+            else:
+                number_of_missing_values = div - len(values2)
+                if number_of_missing_values < len(values) - div - rest:
+                    values = values[-(div + rest - number_of_missing_values):]
+                    values.extend(values2)
+                else:
+                    values.extend(values2)
+        else:
+            number_of_missing_values = div + rest - len(values)
+            values2 = value(f_date, div + number_of_missing_values, df, 'sum')
+            values.extend(values2)
+
+        if len(values) < days:
+            missing_values_count = days - len(values)
+            for _ in range(missing_values_count):
+                values.append({'Date': datetime(1, 1, 1, 0, 0), 'Value': 0})
+        return values
+
+
     def interpolate_missing_values(df):
         data = {}  # Dictionary to store interpolated values for all columns
         indexs = []  # List to store indices of missing values
@@ -170,7 +219,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                         days = len(days_and_hours[hour])  # Number of missing entries in this hour
                         f_date = days_and_hours[hour][0]  # First date in the hour group
                         l_date = days_and_hours[hour][-1]  # Last date in the hour group
-                        ver = Translator.div_verification(f_date, l_date, days, df)
+                        ver = div_verification(f_date, l_date, days, df)
 
                         # Assign verified values to the corresponding indices
                         for i in range(len(ver)):

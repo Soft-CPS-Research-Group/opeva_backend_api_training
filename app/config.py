@@ -47,7 +47,11 @@ class Settings(BaseSettings):
     ]
 
     PRICE_DATASET_CSV_HEADER: ClassVar[dict[str, str]] = {
-        "energy_price" : "mean"
+        # TODO alterar nome no Percepta para electricity_pricing
+        "energy_price" : "mean",
+        "electricity_pricing_predicted_1" : "",
+        "electricity_pricing_predicted_2" : "",
+        "electricity_pricing_predicted_3" : ""
     }
 
     def mongo_uri(self, db_name: str) -> str:
