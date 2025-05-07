@@ -264,14 +264,14 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         write_csv(list(db["R-H-01"].find(query)), settings.BUILDING_DATASET_CSV_HEADER, col)
 
     # Export all EV-related collections
-    ''' for col in ev_collections:
+    for col in ev_collections:
         write_csv(list(db[col].find(query)), settings.EV_DATASET_CSV_HEADER, col)
 
     if "timestamp" in query and "$lte" in query["timestamp"]:
         query["timestamp"]["$lte"] += timedelta(days=1)
 
     write_csv(list(db[price_collection].find(query)), settings.PRICE_DATASET_CSV_HEADER, "pricing")
-'''
+
     # Remove MongoDB _id if present
     structure_doc.pop("_id", None)
 
