@@ -321,7 +321,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     if "timestamp" in query and "$lte" in query["timestamp"]:
         query["timestamp"]["$lte"] += timedelta(days=1)
-
+    print(query)
     write_csv(list(db[price_collection].find(query)), settings.PRICE_DATASET_CSV_HEADER, "pricing")
 
     # Remove MongoDB _id if present
