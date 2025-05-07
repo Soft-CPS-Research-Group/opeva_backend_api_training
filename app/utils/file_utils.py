@@ -224,8 +224,12 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             is_timestamp_present = True
 
         teste = data_format(docs, header)
+        # Certificar-se de que todos os valores de 'timestamp' estão no mesmo tipo com fuso horário UTC
+        teste['timestamp'] = pd.to_datetime(teste['timestamp']).dt.tz_localize('UTC')
+
+        # Filtrando com os timestamps também em UTC
         teste_filtered = teste[~teste['timestamp'].isin([pd.Timestamp('2025-04-18 19:00:00+00:00'),
-                                                     pd.Timestamp('2025-04-18 20:00:00+00:00')])]
+                                                         pd.Timestamp('2025-04-18 20:00:00+00:00')])]
 
         print(interpolate_missing_values(teste_filtered))
 
