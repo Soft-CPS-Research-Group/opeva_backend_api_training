@@ -131,12 +131,12 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
             if new_date not in df.index:
                 there_is_no_data = True
-            elif not np.isnan(df.loc[new_date]['Value']):
-                values.append({'Date': new_date, 'Value': df.loc[new_date]['Value']})
+            elif not df.loc[new_date].isnull().all():
+                values.append({'timestamp': new_date, **df.loc[new_date].to_dict()})
                 n_days += 1
             x += 1
 
-        return sorted(values, key=lambda item: item['Date'])
+        return sorted(values, key=lambda item: item['timestamp'])
 
     def div_verification(s_date, f_date, days, df):
         div = days // 2
