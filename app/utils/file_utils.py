@@ -228,11 +228,17 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 # Reset the counter and index list for the next batch of missing values
                 x = 0
                 indexs = []
+        # Convert the dictionary back to a DataFrame and sort by timestamp
+        df_final = pd.DataFrame.from_dict(data, orient='index')
+        df_final.index = pd.to_datetime(df_final.index)
+        df_final.sort_index(inplace=True)
 
-        return [
-            {'timestamp': ts, **row}
-            for ts, row in sorted(data.items(), key=lambda x: x[0])
-        ]
+        # Move the index to a column so 'timestamp' is included in the dictionaries
+        df_final.reset_index(inplace=True)
+        df_final.rename(columns={'index': 'timestamp'}, inplace=True)
+
+        # Return as a list of dictionaries
+        return df_final.to_dict(orient='records')
 
     def general_format(doc, is_timestamp_present, header):
         ts = doc.get("timestamp")
