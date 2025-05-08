@@ -266,7 +266,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     # Function to export data from a collection into a CSV file
     def write_csv(docs, header, file_name):
         is_timestamp_present = False
-        print(docs)
+
         # Check if timestamp-derived fields are needed
         if any(field in header for field in settings.TIMESTAMP_DATASET_CSV_HEADER):
             is_timestamp_present = True
@@ -321,7 +321,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     if "timestamp" in query and "$lte" in query["timestamp"]:
         query["timestamp"]["$lte"] += timedelta(days=1)
-    print(query)
+
     write_csv(list(db[price_collection].find(query)), settings.PRICE_DATASET_CSV_HEADER, "pricing")
 
     # Remove MongoDB _id if present
