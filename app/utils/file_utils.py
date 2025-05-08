@@ -313,7 +313,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     # Export all building-related collections
     #for col in building_collections:
-    write_csv(list(db["R-H-01"].find(query)), settings.BUILDING_DATASET_CSV_HEADER, col)
+    write_csv(list(db["R-H-01"].find(query)), settings.BUILDING_DATASET_CSV_HEADER, "col")
     '''
     # Export all EV-related collections
     for col in ev_collections:
