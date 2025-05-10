@@ -3,6 +3,7 @@ from app.config import settings
 from app.utils import mongo_utils
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
+from collections import OrderedDict
 import numpy as np
 import pandas as pd
 import shutil
@@ -231,22 +232,21 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         
         return data
 
-    def general_format(doc, is_timestamp_present, header):
-        ts = doc.get("timestamp")
+    def general_format(timestamp, values, is_timestamp_present, header):
         ts_data = {}
 
         # Prepare timestamp-derived fields only if needed
-        if is_timestamp_present and ts:
+        if is_timestamp_present and timestamp:
 
-            if not isinstance(ts, datetime):
-                ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            if not isinstance(timestamp, datetime):
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
 
             ts_data = {
-                "month": ts.month,
-                "hour": ts.hour,
-                "minutes": ts.minute,
-                "day_type": ts.weekday(),
-                "daylight_savings_status": is_daylight_savings(ts)
+                "month": timestamp.month,
+                "hour": timestamp.hour,
+                "minutes": timestamp.minute,
+                "day_type": timestamp.weekday(),
+                "daylight_savings_status": is_daylight_savings(timestamp)
             }
 
         # Construct a CSV row
@@ -256,7 +256,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 # Replace "timestamp" value with its components
                 row.append(str(ts_data.get(field, "")))
             else:
-                row.append(str(doc.get(field, "")))
+                row.append(str(values.get(field, "")))
 
         return row
 
@@ -275,28 +275,30 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
         # If there is missing data, in this step the data is filled in
         data_missing_indices_filled = interpolate_missing_values(data_aggregated)
-        print(data_missing_indices_filled)
+
+        data_missing_indices_filled = OrderedDict(sorted(data_missing_indices_filled.items()))
+
         i = 0
         with open(os.path.join(path, f"{file_name}.csv"), "w") as f:
             # Write the CSV header
             f.write(",".join(header) + "\n")
 
-            for doc in data_missing_indices_filled:
+            for timestamp, values in data_missing_indices_filled:
                 row = []
                 if header == settings.PRICE_DATASET_CSV_HEADER:
-                    i+=1
-                    row.append(doc.get("energy_price", 0))
-                    row.append(docs[i + 1].get("energy_price", 0) if i + 1 < len(docs) else 0)
-                    row.append(docs[i + 2].get("energy_price", 0) if i + 2 < len(docs) else 0)
-                    row.append(docs[i + 3].get("energy_price", 0) if i + 3 < len(docs) else 0)
-
+                    row.append(values.get("energy_price", 0))
+                    for j in range(1, 4):
+                        next_key = timestamp + j * periodo
+                        row.append(
+                            data_missing_indices_filled
+                            .get(next_key, {})
+                            .get("energy_price", 0)
+                        )
                 else:
-                    row = general_format(doc, is_timestamp_present, header)
+                    row = general_format(timestamp, values, is_timestamp_present, header)
 
                 # Write the row to the file
                 f.write(",".join(map(str, row)) + "\n")
-
-
 
     # Build MongoDB query for the time range
     query = {}
