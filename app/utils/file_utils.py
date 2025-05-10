@@ -283,7 +283,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             # Write the CSV header
             f.write(",".join(header) + "\n")
 
-            for timestamp, values in data_missing_indices_filled:
+            for timestamp, values in data_missing_indices_filled.items():
                 row = []
                 if header == settings.PRICE_DATASET_CSV_HEADER:
                     row.append(values.get("energy_price", 0))
