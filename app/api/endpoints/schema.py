@@ -21,6 +21,3 @@ def update_schema(site: str, request: SchemaUpdateRequest):
 def get_schema(site: str):
     return get_schema_controller(site)
 
-@router.get("/schema/list")
-def list_schemas():
-    return list_schemas_controller()

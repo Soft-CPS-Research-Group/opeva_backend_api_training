@@ -27,14 +27,3 @@ def get_schema(site: str) -> dict | None:
     db = get_db(site)
     doc = db["schema"].find_one({"_id": "schema"})
     return doc["value"] if doc else None
-
-def list_sites_with_schema() -> list[str]:
-    client = get_client()
-    result = []
-    for db_name in client.list_database_names():
-        db = client[db_name]
-        if "schema" in db.list_collection_names():
-            doc = db["schema"].find_one({"_id": "schema"})
-            if doc:
-                result.append(db_name)
-    return result

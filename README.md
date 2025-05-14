@@ -135,7 +135,9 @@ This will start:
 | DELETE | /dataset/{name}                         | Delete a dataset and its contents                                          |
 | GET    | /dataset/dates-available/{site}         | Check available dates to generate a dataset                                |
 | GET    | /hosts                                  | List all available hosts                                                   |
-
+| POST   | /schema/create                          | Create a new site with its schema. Fails if the site already exists.     |
+| PUT    | /schema/update/{site}                   | Update the schema for an existing site.                                  |
+| GET    | /schema/{site}                          | Retrieve the schema for a specific site.                                 |
 ---
 
 ## CI/CD Pipeline

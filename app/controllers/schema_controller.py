@@ -25,9 +25,3 @@ def get_schema_controller(site: str):
         return schema
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-def list_schemas_controller():
-    try:
-        return {"schemas": schema_service.list_sites_with_schema()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
