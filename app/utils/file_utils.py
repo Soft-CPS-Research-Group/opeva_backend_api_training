@@ -359,8 +359,8 @@ def list_dates_available_per_collection():
             collection = db[collection_name]
 
             # Find the oldest and newest documents based on 'timestamp'
-            doc_oldest = collection.find_one(query, sort=[('_id', 1)])
-            doc_newest = collection.find_one(query, sort=[('_id', -1)])
+            doc_oldest = collection.find_one(sort=[('_id', 1)])
+            doc_newest = collection.find_one(sort=[('_id', -1)])
 
             # Parse and normalize timestamps
             ts_oldest = parse_timestamp(doc_oldest["timestamp"])
