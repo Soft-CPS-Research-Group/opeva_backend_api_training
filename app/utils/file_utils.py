@@ -348,10 +348,11 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
 def list_dates_available_per_collection(site_id: str):
     db = mongo_utils.get_db(site_id)
-    print(site_id)
 
     # List all collections in the database
     collections = db.list_collection_names()
+    
+    results = []
 
     # Iterate over all collections in the database
     for collection_name in collections:
@@ -373,7 +374,6 @@ def list_dates_available_per_collection(site_id: str):
 
         # Append the results for this collection
         results.append({
-            "database": db_name,
             "collection": collection_name,
             "oldest_timestamp": ts_oldest.isoformat(),
             "newest_timestamp": ts_newest.isoformat()
