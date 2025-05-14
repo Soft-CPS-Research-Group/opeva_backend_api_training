@@ -47,20 +47,23 @@ def read_progress(job_id):
     return {"progress": "No updates yet."}
 
 # Utility function to convert timestamp strings to datetime objects
-def parse_timestamp(ts: str) -> datetime:
-    try:
-        # Handle ISO format with timezone: "2025-04-18T16:54:17.000+00:00"
-        return datetime.fromisoformat(ts).astimezone(timezone.utc)
-    except ValueError:
+def parse_timestamp(ts):
+    if isinstance(ts, datetime):
+        return ts.astimezone(timezone.utc)
+
+    if isinstance(ts, str):
         try:
-            # Handle ISO format without timezone: "2025-05-01T17:46:48"
-            return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+            return datetime.fromisoformat(ts).astimezone(timezone.utc)
         except ValueError:
             try:
-                # Fallback for the older format: "2025-05-01 17:46:48"
-                return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
             except ValueError:
-                raise ValueError(f"Invalid timestamp format: {ts}")
+                try:
+                    return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                except ValueError:
+                    raise ValueError(f"Invalid timestamp string format: {ts}")
+
+    raise TypeError(f"Unsupported timestamp type: {type(ts)}")
 
 def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, from_ts: str = None, until_ts: str = None):
     # Create the target dataset directory
