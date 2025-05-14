@@ -76,6 +76,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     # Fetch the structure from the special "schema" collection
     structure_doc = db["schema"].find_one()
+    # TODO: retornar este erro para o pedido
     if not structure_doc:
         raise ValueError(f"Missing 'schema' collection in site '{site_id}'")
 
@@ -95,7 +96,32 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     from_dt = parse_timestamp(from_ts) if from_ts else None
     until_dt = parse_timestamp(until_ts) if until_ts else None
 
-    # TODO comparar aqui as datas do que está na bd com as datas passadas por parâmetro
+    # Validate and adjust the requested date range based on actual data availability in MongoDB
+    date_ranges = list_dates_available_per_collection(site_id)
+
+    # Filter only relevant collections (buildings and EVs, if needed)
+    relevant_collections = building_collections + ev_collections
+
+    # Keep only records that match the relevant collections
+    relevant_ranges = [r for r in date_ranges if r["installation"] in relevant_collections]
+
+    if not relevant_ranges:
+        raise ValueError("No available data found in the relevant collections.")
+
+    # Find the most recent start (latest of the oldest records)
+    latest_start = max(parse_timestamp(r["oldest_record"]) for r in relevant_ranges)
+    # Find the earliest end (earliest of the newest records)
+    earliest_end = min(parse_timestamp(r["newest_record"]) for r in relevant_ranges)
+
+    # Adjust the range if the requested timestamps exceed what's available
+    if not from_dt or from_dt < latest_start:
+        from_dt = latest_start
+    if not until_dt or until_dt > earliest_end:
+        until_dt = earliest_end
+
+    # Ensure the adjusted date range is valid
+    if from_dt >= until_dt:
+        raise ValueError("Invalid time range: no data available for the given time period.")
 
     # Utility function to determine if a datetime is in daylight savings time (Lisbon time zone)
     def is_daylight_savings(ts: datetime) -> int:
@@ -351,12 +377,11 @@ def list_dates_available_per_collection(site_id: str):
 
     # List all collections in the database
     collections = db.list_collection_names()
-    
+
     results = []
 
     # Iterate over all collections in the database
     for collection_name in collections:
-        print(collection_name)
         if collection_name == "schema":
             continue
 
@@ -365,8 +390,6 @@ def list_dates_available_per_collection(site_id: str):
         # Find the oldest and newest documents based on 'timestamp'
         doc_oldest = collection.find_one(sort=[('_id', 1)])
         doc_newest = collection.find_one(sort=[('_id', -1)])
-        print(doc_oldest)
-        print(doc_newest)
 
         # Parse and normalize timestamps
         ts_oldest = parse_timestamp(doc_oldest["timestamp"])
@@ -374,9 +397,9 @@ def list_dates_available_per_collection(site_id: str):
 
         # Append the results for this collection
         results.append({
-            "collection": collection_name,
-            "oldest_timestamp": ts_oldest.isoformat(),
-            "newest_timestamp": ts_newest.isoformat()
+            "installation": collection_name,
+            "oldest_record": ts_oldest.isoformat(),
+            "newest_record": ts_newest.isoformat()
         })
 
     return results
