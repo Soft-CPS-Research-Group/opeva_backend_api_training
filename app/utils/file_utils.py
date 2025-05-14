@@ -343,46 +343,38 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     return path
 
-def list_dates_available_per_collection():
-    for site_id in mongo_utils.list_databases():
-        db = mongo_utils.get_db(site_id)
-        print(site_id)
+def list_dates_available_per_collection(site_id: str):
+    db = mongo_utils.get_db(site_id)
+    print(site_id)
 
-        if site_id in settings.DBS_TO_IGNORE:
-            continue
-            
-        try:
-            # List all collections in the database
-            collections = db.list_collection_names()
-        except OperationFailure:
-            # Skip databases without read permission
+    # List all collections in the database
+    collections = db.list_collection_names()
+
+    # Iterate over all collections in the database
+    for collection_name in collections:
+        print(collection_name)
+        if collection_name == "schema":
             continue
 
-        # Iterate over all collections in the database
-        for collection_name in collections:
-            print(collection_name)
-            if collection_name == "schema":
-                continue
+        collection = db[collection_name]
 
-            collection = db[collection_name]
+        # Find the oldest and newest documents based on 'timestamp'
+        doc_oldest = collection.find_one(sort=[('_id', 1)])
+        doc_newest = collection.find_one(sort=[('_id', -1)])
+        print(doc_oldest)
+        print(doc_newest)
 
-            # Find the oldest and newest documents based on 'timestamp'
-            doc_oldest = collection.find_one(sort=[('_id', 1)])
-            doc_newest = collection.find_one(sort=[('_id', -1)])
-            print(doc_oldest)
-            print(doc_newest)
+        # Parse and normalize timestamps
+        ts_oldest = parse_timestamp(doc_oldest["timestamp"])
+        ts_newest = parse_timestamp(doc_newest["timestamp"])
 
-            # Parse and normalize timestamps
-            ts_oldest = parse_timestamp(doc_oldest["timestamp"])
-            ts_newest = parse_timestamp(doc_newest["timestamp"])
-
-            # Append the results for this collection
-            results.append({
-                "database": db_name,
-                "collection": collection_name,
-                "oldest_timestamp": ts_oldest.isoformat(),
-                "newest_timestamp": ts_newest.isoformat()
-            })
+        # Append the results for this collection
+        results.append({
+            "database": db_name,
+            "collection": collection_name,
+            "oldest_timestamp": ts_oldest.isoformat(),
+            "newest_timestamp": ts_newest.isoformat()
+        })
 
     return results
 

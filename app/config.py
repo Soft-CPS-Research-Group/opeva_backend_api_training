@@ -54,10 +54,6 @@ class Settings(BaseSettings):
         "electricity_pricing_predicted_3" : ""
     }
 
-    DBS_TO_IGNORE: ClassVar[list[str]] = [
-        "PulseCharge"
-    ]
-
     def mongo_uri(self, db_name: str) -> str:
         return f"mongodb://{self.MONGO_USER}:{self.MONGO_PASSWORD}@{self.MONGO_HOST}:{self.MONGO_PORT}/{db_name}?authSource={self.MONGO_AUTH_SOURCE}"
 
