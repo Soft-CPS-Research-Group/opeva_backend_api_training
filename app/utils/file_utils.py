@@ -332,7 +332,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 if header == settings.PRICE_DATASET_CSV_HEADER:
                     row.append(values.get("energy_price", 0))
                     for j in range(1, 4):
-                        next_key = timestamp + j * period
+                        next_key = timestamp + pd.Timedelta(minutes=j * period)
                         row.append(
                             data_missing_indices_filled
                             .get(next_key, {})
