@@ -46,11 +46,23 @@ def read_progress(job_id):
             return json.load(f)
     return {"progress": "No updates yet."}
 
-def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, from_ts: str = None, until_ts: str = None):
-    # Utility function to convert timestamp strings to datetime objects
-    def parse_timestamp(ts: str) -> datetime:
-        return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+# Utility function to convert timestamp strings to datetime objects
+def parse_timestamp(ts: str) -> datetime:
+    try:
+        # Handle ISO format with timezone: "2025-04-18T16:54:17.000+00:00"
+        return datetime.fromisoformat(ts).astimezone(timezone.utc)
+    except ValueError:
+        try:
+            # Handle ISO format without timezone: "2025-05-01T17:46:48"
+            return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            try:
+                # Fallback for the older format: "2025-05-01 17:46:48"
+                return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            except ValueError:
+                raise ValueError(f"Invalid timestamp format: {ts}")
 
+def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, from_ts: str = None, until_ts: str = None):
     # Create the target dataset directory
     path = os.path.join(settings.DATASETS_DIR, name)
     os.makedirs(path, exist_ok=True)
@@ -79,6 +91,8 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     # Parse timestamp range if provided
     from_dt = parse_timestamp(from_ts) if from_ts else None
     until_dt = parse_timestamp(until_ts) if until_ts else None
+
+    # TODO comparar aqui as datas do que está na bd com as datas passadas por parâmetro
 
     # Utility function to determine if a datetime is in daylight savings time (Lisbon time zone)
     def is_daylight_savings(ts: datetime) -> int:
@@ -276,9 +290,10 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         # If there is missing data, in this step the data is filled in
         data_missing_indices_filled = interpolate_missing_values(data_aggregated)
 
+        data_missing_indices_filled = {timestamp: values for timestamp, values in data_missing_indices_filled.items() if from_dt <= pd.to_datetime(timestamp) <= until_dt}
+
         data_missing_indices_filled = OrderedDict(sorted(data_missing_indices_filled.items()))
 
-        i = 0
         with open(os.path.join(path, f"{file_name}.csv"), "w") as f:
             # Write the CSV header
             f.write(",".join(header) + "\n")
@@ -301,18 +316,9 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 f.write(",".join(map(str, row)) + "\n")
 
     # Build MongoDB query for the time range
-    query = {}
-    if from_dt:
-        query["timestamp"] = {"$gte": from_dt}
-    if until_dt:
-        if "timestamp" in query:
-            query["timestamp"]["$lte"] = until_dt  + timedelta(minutes=period)
-        else:
-            query["timestamp"] = {"$lte": until_dt + timedelta(minutes=period)}
-
     # Export all building-related collections
-    #for col in building_collections:
-    write_csv(list(db["R-H-01"].find(query)), settings.BUILDING_DATASET_CSV_HEADER, "col")
+    for col in building_collections:
+        write_csv(list(db["R-H-01"].find()), settings.BUILDING_DATASET_CSV_HEADER, col)
     '''
     # Export all EV-related collections
     for col in ev_collections:
@@ -336,6 +342,39 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         json.dump(schema, f, indent=2)
 
     return path
+
+def list_dates_available_per_collection():
+    for site_id in mongo_utils.list_databases():
+        db = mongo_utils.get_db(site_id)
+
+        try:
+            # List all collections in the database
+            collections = db.list_collection_names()
+        except OperationFailure:
+            # Skip databases without read permission
+            continue
+
+        # Iterate over all collections in the database
+        for collection_name in collections:
+            collection = db[collection_name]
+
+            # Find the oldest and newest documents based on 'timestamp'
+            doc_oldest = collection.find_one(query, sort=[('_id', 1)])
+            doc_newest = collection.find_one(query, sort=[('_id', -1)])
+
+            # Parse and normalize timestamps
+            ts_oldest = parse_timestamp(doc_oldest["timestamp"])
+            ts_newest = parse_timestamp(doc_newest["timestamp"])
+
+            # Append the results for this collection
+            results.append({
+                "database": db_name,
+                "collection": collection_name,
+                "oldest_timestamp": ts_oldest.isoformat(),
+                "newest_timestamp": ts_newest.isoformat()
+            })
+
+    return results
 
 def list_available_datasets():
     return [d for d in os.listdir(settings.DATASETS_DIR) if os.path.isdir(os.path.join(settings.DATASETS_DIR, d))]
