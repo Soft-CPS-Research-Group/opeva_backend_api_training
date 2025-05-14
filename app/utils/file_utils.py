@@ -356,6 +356,10 @@ def list_dates_available_per_collection():
 
         # Iterate over all collections in the database
         for collection_name in collections:
+
+            if collection_name == "schema":
+                continue
+                
             collection = db[collection_name]
 
             # Find the oldest and newest documents based on 'timestamp'
