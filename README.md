@@ -126,13 +126,14 @@ This will start:
 | GET    | /job-info/{job_id}                      | Get metadata about a job                                                   |
 | DELETE | /job/{job_id}                           | Delete job and its files                                                   |
 | GET    | /health                                 | Health check of the API                                                    |
-| POST   | /config/create                          | Create new config file                                                     |
-| GET    | /configs                                | List all config files                                                      |
-| GET    | /config/{file}                          | View a config file                                                         |
-| DELETE | /config/{file}                          | Delete a config file                                                       |
+| POST   | /experiment-configs/create              | Create new config file                                                     |
+| GET    | /experiment-configs                     | List all config files                                                      |
+| GET    | /experiment-configs/{file}              | View a config file                                                         |
+| DELETE | /experiment-configs/{file}              | Delete a config file                                                       |
 | POST   | /dataset                                | Create a new dataset from a MongoDB site (buildings + EVs to CSVs)         |
 | GET    | /datasets                               | List all available datasets                                                |
 | DELETE | /dataset/{name}                         | Delete a dataset and its contents                                          |
+| GET    | /dataset/dates-available/{site}         | Check available dates to generate a dataset                                |
 | GET    | /hosts                                  | List all available hosts                                                   |
 
 ---
