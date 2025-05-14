@@ -134,7 +134,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
         # Ensure the 'timestamp' column is in datetime format with UTC timezone
         raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'], utc=True)
-
+        print(raw_data)
         # Set 'timestamp' as the index to allow time-based resampling
         raw_data.set_index('timestamp', inplace=True)
 
@@ -348,7 +348,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     # Export all building-related collections
     for col in building_collections:
         write_csv(list(db["R-H-01"].find()), settings.BUILDING_DATASET_CSV_HEADER, col)
-    '''
+
     # Export all EV-related collections
     for col in ev_collections:
         write_csv(list(db[col].find(query)), settings.EV_DATASET_CSV_HEADER, col)
@@ -358,7 +358,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     write_csv(list(db[price_collection].find(query)), settings.PRICE_DATASET_CSV_HEADER, "pricing")
 
-    # Remove MongoDB _id if present'''
+    # Remove MongoDB _id if present
     structure_doc.pop("_id", None)
 
     # Combine the configuration with the structure and write to JSON
