@@ -347,6 +347,10 @@ def list_dates_available_per_collection():
     for site_id in mongo_utils.list_databases():
         db = mongo_utils.get_db(site_id)
         print(site_id)
+
+        if site_id in settings.DBS_TO_IGNORE:
+            continue
+            
         try:
             # List all collections in the database
             collections = db.list_collection_names()
