@@ -43,12 +43,12 @@ class Settings(BaseSettings):
     ]
 
     EV_DATASET_CSV_HEADER: ClassVar[list[str]] = [
-        "timestamp", "power_consumption", "solar_generation", "ev_charge", "battery_state"
+        "electric_vehicle_charger_state","electric_vehicle_id","electric_vehicle_battery_capacity_khw","current_soc","electric_vehicle_departure_time","electric_vehicle_required_soc_departure","electric_vehicle_estimated_arrival_time","electric_vehicle_estimated_soc_arrival"
     ]
 
     PRICE_DATASET_CSV_HEADER: ClassVar[dict[str, str]] = {
         # TODO alterar nome no Percepta para electricity_pricing
-        "energy_price" : "mean",
+        "electricity_pricing" : "mean",
         "electricity_pricing_predicted_1" : "",
         "electricity_pricing_predicted_2" : "",
         "electricity_pricing_predicted_3" : ""

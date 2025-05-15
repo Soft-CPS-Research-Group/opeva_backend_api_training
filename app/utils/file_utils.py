@@ -83,13 +83,12 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     # Saves the buildings ids present in the schema for future data fetch
     building_ids = list(structure_doc.get("buildings").keys())
 
-    # TODO: Add EV (electric vehicle) structure here
+    # TODO: Meto so corres que aparecem no schema?
 
-    # Find collections that start with 'building_' followed by each building_id
-    # TODO: This logic will be updated later to use a specific prefix once Percepta side is updated
+    # Find collections that start with 'building_' followed by each building_id and are in the schema
     building_collections = [c for c in collection_names if
-                            any(c.startswith(building_id) for building_id in building_ids)]
-    ev_collections = [c for c in collection_names if c.startswith("ev_")]
+                            any(c.startswith(f"building_{building_id}") for building_id in building_ids)]
+
     price_collection = building_collections[0]
 
     # Parse timestamp range if provided
@@ -347,11 +346,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     # Build MongoDB query for the time range
     # Export all building-related collections
     for col in building_collections:
-        write_csv(list(db["R-H-01"].find()), settings.BUILDING_DATASET_CSV_HEADER, col)
-
-    # Export all EV-related collections
-    for col in ev_collections:
-        write_csv(list(db[col].find()), settings.EV_DATASET_CSV_HEADER, col)
+        write_csv(list(db[col].find()), settings.BUILDING_DATASET_CSV_HEADER, col)
 
     write_csv(list(db[price_collection].find()), settings.PRICE_DATASET_CSV_HEADER, "pricing")
 
