@@ -359,7 +359,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         # This step aggregates the data over the period specified as a parameter.
         # The aggregation is performed based on the column labels, applying specific aggregation methods,
         # such as summing all values or calculating the average, as defined in the provided aggregation rules.
-        data_aggregated = data_format(docs, settings.EV_DATASET_CSV_HEADER)
+        data_aggregated = data_format(docs, header)
         print(data_aggregated)
         if header == settings.PRICE_DATASET_CSV_HEADER:
            price_format(data_aggregated, file_name)
