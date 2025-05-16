@@ -82,7 +82,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     # Saves the buildings ids present in the schema for future data fetch
     building_ids = list(structure_doc.get("buildings").keys())
-
+    print(building_ids)
     # TODO: Meto so corres que aparecem no schema?
 
     # Find collections that start with 'building_' followed by each building_id and are in the schema
