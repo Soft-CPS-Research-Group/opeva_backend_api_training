@@ -98,11 +98,8 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     # Validate and adjust the requested date range based on actual data availability in MongoDB
     date_ranges = list_dates_available_per_collection(site_id)
 
-    # Filter only relevant collections (buildings and EVs, if needed)
-    relevant_collections = building_collections + ev_collections
-
     # Keep only records that match the relevant collections
-    relevant_ranges = [r for r in date_ranges if r["installation"] in relevant_collections]
+    relevant_ranges = [r for r in date_ranges if r["installation"] in building_collections]
 
     if not relevant_ranges:
         raise ValueError("No available data found in the relevant collections.")
