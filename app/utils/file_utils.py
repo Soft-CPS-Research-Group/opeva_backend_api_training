@@ -371,9 +371,10 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     charging_sessions_by_charger = {}
     # Export all building-related collections
     for col in building_collections:
-        collection = db[col].find()
-        write_csv(list(collection), settings.BUILDING_DATASET_CSV_HEADER, col)
+        collection = list(db[col].find())
+        write_csv(collection, settings.BUILDING_DATASET_CSV_HEADER, col)
         for doc in collection:
+            print(doc)
             timestamp = doc["timestamp"]
             for session in doc.get("charging_sessions", []):
                 print(session)
