@@ -374,10 +374,8 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         collection = list(db[col].find())
         write_csv(collection, settings.BUILDING_DATASET_CSV_HEADER, col)
         for doc in collection:
-            print(doc)
             timestamp = doc["timestamp"]
             for session in doc.get("charging_sessions", []):
-                print(session)
                 charger_id = session.get("charger_id")
                 if not charger_id:
                     continue
@@ -406,6 +404,8 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                     charging_sessions_by_charger[charger_id] = []
 
                 charging_sessions_by_charger[charger_id].append(session_data)
+
+        print(charging_sessions_by_charger)
 
     for charger in charging_sessions_by_charger.keys():
         print(charger)
