@@ -321,7 +321,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
         with open(os.path.join(path, f"{file_name}.csv"), "w") as f:
             # Write the CSV header
-            f.write(",".join(header) + "\n")
+            f.write(",".join(settings.PRICE_DATASET_CSV_HEADER) + "\n")
 
             for timestamp, values in data_missing_indices_filled.items():
                 row = []
