@@ -271,79 +271,51 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         
         return data
 
-    def general_format(timestamp, values, is_timestamp_present, header):
-        ts_data = {}
-
-        # Prepare timestamp-derived fields only if needed
-        if is_timestamp_present and timestamp:
-
-            if not isinstance(timestamp, datetime):
-                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-
-            ts_data = {
-                "month": timestamp.month,
-                "hour": timestamp.hour,
-                "minutes": timestamp.minute,
-                "day_type": timestamp.weekday(),
-                "daylight_savings_status": is_daylight_savings(timestamp)
-            }
-
-        # Construct a CSV row
-        row = []
-        for field in header:
-            if field in ts_data:
-                # Replace "timestamp" value with its components
-                row.append(str(ts_data.get(field, "")))
-            else:
-                row.append(str(values.get(field, "")))
-
-        return row
-
-    def ev_format(timestamp, values, is_timestamp_present, header):
-        ts_data = {}
-
-        # Prepare timestamp-derived fields only if needed
-        if is_timestamp_present and timestamp:
-
-            if not isinstance(timestamp, datetime):
-                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-
-            ts_data = {
-                "month": timestamp.month,
-                "hour": timestamp.hour,
-                "minutes": timestamp.minute,
-                "day_type": timestamp.weekday(),
-                "daylight_savings_status": is_daylight_savings(timestamp)
-            }
-
-        # Construct a CSV row
-        row = []
-        for field in header:
-            if field in ts_data:
-                # Replace "timestamp" value with its components
-                row.append(str(ts_data.get(field, "")))
-            else:
-                row.append(str(values.get(field, "")))
-
-        return row
-
-    # Function to export data from a collection into a CSV file
-    def write_csv(docs, header, file_name):
-        is_timestamp_present = False
-
-        # Check if timestamp-derived fields are needed
-        if any(field in header for field in settings.TIMESTAMP_DATASET_CSV_HEADER):
-            is_timestamp_present = True
-
-        # This step aggregates the data over the period specified as a parameter.
-        # The aggregation is performed based on the column labels, applying specific aggregation methods,
-        # such as summing all values or calculating the average, as defined in the provided aggregation rules.
-        data_aggregated = data_format(docs, header)
+    def building_format(data_aggregated, file_name):
 
         # If there is missing data, in this step the data is filled in
         data_missing_indices_filled = interpolate_missing_values(data_aggregated)
 
-        data_missing_indices_filled = {timestamp: values for timestamp, values in data_missing_indices_filled.items() if from_dt <= pd.to_datetime(timestamp) <= until_dt}
+        data_missing_indices_filled = {timestamp: values for timestamp, values in data_missing_indices_filled.items() if
+                                       from_dt <= pd.to_datetime(timestamp) <= until_dt}
+
+        data_missing_indices_filled = OrderedDict(sorted(data_missing_indices_filled.items()))
+
+        with open(os.path.join(path, f"{file_name}.csv"), "w") as f:
+            # Write the CSV header
+            f.write(",".join(settings.BUILDING_DATASET_CSV_HEADER) + "\n")
+
+            for timestamp, values in data_missing_indices_filled.items():
+                if not isinstance(timestamp, datetime):
+                    timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+
+                ts_data = {
+                    "month": timestamp.month,
+                    "hour": timestamp.hour,
+                    "minutes": timestamp.minute,
+                    "day_type": timestamp.weekday(),
+                    "daylight_savings_status": is_daylight_savings(timestamp)
+                }
+
+                # Construct a CSV row
+                row = []
+                for field in settings.BUILDING_DATASET_CSV_HEADER:
+                    if field in ts_data:
+                        # Replace "timestamp" value with its components
+                        row.append(str(ts_data.get(field, "")))
+                    else:
+                        row.append(str(values.get(field, "")))
+
+                # Write the row to the file
+                f.write(",".join(map(str, row)) + "\n")
+
+    def price_format(data_aggregated, file_name):
+
+        # If there is missing data, in this step the data is filled in
+        data_missing_indices_filled = interpolate_missing_values(data_aggregated)
+
+        data_missing_indices_filled = {timestamp: values for timestamp, values in data_missing_indices_filled.items() if
+                                       from_dt <= pd.to_datetime(timestamp) <= until_dt}
 
         data_missing_indices_filled = OrderedDict(sorted(data_missing_indices_filled.items()))
 
@@ -353,20 +325,51 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
             for timestamp, values in data_missing_indices_filled.items():
                 row = []
-                if header == settings.PRICE_DATASET_CSV_HEADER:
-                    row.append(values.get("energy_price", 0))
-                    for j in range(1, 4):
-                        next_key = timestamp + pd.Timedelta(minutes=j * period)
-                        row.append(
-                            data_missing_indices_filled
-                            .get(next_key, {})
-                            .get("energy_price", 0)
-                        )
-                else:
-                    row = general_format(timestamp, values, is_timestamp_present, header)
+
+                row.append(values.get("electricity_pricing", 0))
+                for j in range(1, 4):
+                    next_key = timestamp + pd.Timedelta(minutes=j * period)
+                    row.append(
+                        data_missing_indices_filled
+                        .get(next_key, {})
+                        .get("electricity_pricing", 0)
+                    )
 
                 # Write the row to the file
                 f.write(",".join(map(str, row)) + "\n")
+
+    def ev_format(data_aggregated, filename):
+
+
+        with open(os.path.join(path, f"{file_name}.csv"), "w") as f:
+            # Write the CSV header
+            f.write(",".join(settings.EV_DATASET_CSV_HEADER) + "\n")
+
+            for timestamp, values in data_missing_indices_filled.items():
+                row = []
+                for field in settings.EV_DATASET_CSV_HEADER:
+                    row.append(str(values.get(field, "")))
+
+                # Write the row to the file
+                f.write(",".join(map(str, row)) + "\n")
+
+
+    # Function to export data from a collection into a CSV file
+    def write_csv(docs, header, file_name):
+        # This step aggregates the data over the period specified as a parameter.
+        # The aggregation is performed based on the column labels, applying specific aggregation methods,
+        # such as summing all values or calculating the average, as defined in the provided aggregation rules.
+        data_aggregated = data_format(docs, settings.EV_DATASET_CSV_HEADER)
+        print(data_aggregated)
+        if header == settings.PRICE_DATASET_CSV_HEADER:
+           price_format(data_aggregated, file_name)
+
+        elif header == settings.BUILDING_DATASET_CSV_HEADER:
+            building_format(data_aggregated, file_name)
+
+        '''elif header == settings.EV_DATASET_CSV_HEADER:
+            ev_format(data_aggregated, file_name)'''
+
 
     charging_sessions_by_charger = {}
     # Export all building-related collections
