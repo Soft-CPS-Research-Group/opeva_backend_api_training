@@ -82,13 +82,13 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     # Saves the buildings ids present in the schema for future data fetch
     building_ids = list(structure_doc.get("buildings").keys())
-    print(building_ids)
+
     # TODO: Meto so corres que aparecem no schema?
 
     # Find collections that start with 'building_' followed by each building_id and are in the schema
     building_collections = [c for c in collection_names if
                             any(c.startswith(f"building_{building_id}") for building_id in building_ids)]
-
+    # TODO tratar aqui para caso building_collections esteja vazio
     price_collection = building_collections[0]
 
     # Parse timestamp range if provided
@@ -130,7 +130,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
         # Ensure the 'timestamp' column is in datetime format with UTC timezone
         raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'], utc=True)
-        print(raw_data)
+
         # Set 'timestamp' as the index to allow time-based resampling
         raw_data.set_index('timestamp', inplace=True)
 
@@ -405,12 +405,8 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
                 charging_sessions_by_charger[charger_id].append(session_data)
 
-        print(charging_sessions_by_charger)
 
     for charger in charging_sessions_by_charger.keys():
-        print(charger)
-
-        print(charging_sessions_by_charger.get(charger))
         write_csv(charging_sessions_by_charger.get(charger), settings.EV_DATASET_CSV_HEADER, charger)
 
     write_csv(list(db[price_collection].find()), settings.PRICE_DATASET_CSV_HEADER, "pricing")
