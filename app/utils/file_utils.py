@@ -302,6 +302,34 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
         return row
 
+    def ev_format(timestamp, values, is_timestamp_present, header):
+        ts_data = {}
+
+        # Prepare timestamp-derived fields only if needed
+        if is_timestamp_present and timestamp:
+
+            if not isinstance(timestamp, datetime):
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+
+            ts_data = {
+                "month": timestamp.month,
+                "hour": timestamp.hour,
+                "minutes": timestamp.minute,
+                "day_type": timestamp.weekday(),
+                "daylight_savings_status": is_daylight_savings(timestamp)
+            }
+
+        # Construct a CSV row
+        row = []
+        for field in header:
+            if field in ts_data:
+                # Replace "timestamp" value with its components
+                row.append(str(ts_data.get(field, "")))
+            else:
+                row.append(str(values.get(field, "")))
+
+        return row
+
     # Function to export data from a collection into a CSV file
     def write_csv(docs, header, file_name):
         is_timestamp_present = False
@@ -343,10 +371,45 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 # Write the row to the file
                 f.write(",".join(map(str, row)) + "\n")
 
-    # Build MongoDB query for the time range
+    charging_sessions_by_charger = {}
     # Export all building-related collections
     for col in building_collections:
-        write_csv(list(db[col].find()), settings.BUILDING_DATASET_CSV_HEADER, col)
+        collection = db[col].find()
+        write_csv(list(collection), settings.BUILDING_DATASET_CSV_HEADER, col)
+        for doc in collection:
+            timestamp = doc["timestamp"]
+            for session in doc.get("charging_sessions", []):
+                charger_id = session.get("charger_id")
+                if not charger_id:
+                    continue
+
+                state = 1
+
+                # If there is not an user_id or power, it is considered that there is no car charging in the station
+                if session.get("user_id") != "" and session.get("power") != 0:
+                    state = 3
+
+                session_data = {
+                    "timestamp": timestamp,
+                    "electric_vehicle_charger_state": state,
+                    "power": session.get("power", 0),
+                    "electric_vehicle_id": session.get("user_id", ""),
+                    "electric_vehicle_battery_capacity_khw": 0,   # TODO arranjar o que meter aqui
+                    "current_soc": session.get("soc", 0),
+                    "electric_vehicle_departure_time": session.get("flexibility", {}).get("departure.time", 0),
+                    "electric_vehicle_required_soc_departure": session.get("flexibility", {}).get("departure.soc", 0),
+                    "electric_vehicle_estimated_arrival_time": session.get("flexibility", {}).get("arrival.time", 0),
+                    "electric_vehicle_estimated_soc_arrival": 0   # TODO arranjar o que meter aqui
+                }
+
+                # TODO ir buscar ao schema o tamanho da bateria
+                if charger_id not in charging_sessions_by_charger:
+                    charging_sessions_by_charger[charger_id] = []
+
+                charging_sessions_by_charger[charger_id].append(session_data)
+
+    for charger in charging_sessions_by_charger:
+        write_csv(charging_sessions_by_charger.get(charger), settings.EV_DATASET_CSV_HEADER, charger)
 
     write_csv(list(db[price_collection].find()), settings.PRICE_DATASET_CSV_HEADER, "pricing")
 
