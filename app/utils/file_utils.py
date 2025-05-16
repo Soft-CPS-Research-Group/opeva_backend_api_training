@@ -406,6 +406,8 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 charging_sessions_by_charger[charger_id].append(session_data)
 
     for charger in charging_sessions_by_charger.keys():
+        print(charger)
+
         print(charging_sessions_by_charger.get(charger))
         write_csv(charging_sessions_by_charger.get(charger), settings.EV_DATASET_CSV_HEADER, charger)
 
