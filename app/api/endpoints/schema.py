@@ -2,8 +2,7 @@ from fastapi import APIRouter
 from app.controllers.schema_controller import (
     create_schema_controller,
     update_schema_controller,
-    get_schema_controller,
-    list_schemas_controller,
+    get_schema_controller
 )
 from app.models.schema import SchemaCreateRequest, SchemaUpdateRequest
 
