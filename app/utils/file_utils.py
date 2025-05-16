@@ -376,6 +376,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         for doc in collection:
             timestamp = doc["timestamp"]
             for session in doc.get("charging_sessions", []):
+                print(session)
                 charger_id = session.get("charger_id")
                 if not charger_id:
                     continue
