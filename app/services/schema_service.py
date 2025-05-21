@@ -28,4 +28,4 @@ def get_schema(site: str) -> dict | None:
     db = get_db(site)
     print(f"Database object: {db}")
     doc = db["schema"].find_one()
-    return doc if doc else None
+    return doc.get("buildings") if doc else None
