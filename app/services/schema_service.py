@@ -26,5 +26,6 @@ def update_schema(site: str, schema: dict):
 def get_schema(site: str) -> dict | None:
     print(f"Fetching schema for site: {site} inside get_schema")
     db = get_db(site)
-    doc = db["schema"].find_one({"_id": "schema"})
+    print(f"Database object: {db}")
+    doc = db["schema"].find_one()
     return doc["value"] if doc else None
