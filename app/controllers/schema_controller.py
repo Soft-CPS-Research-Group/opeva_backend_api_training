@@ -19,8 +19,6 @@ def update_schema_controller(site: str, schema: dict):
 
 def get_schema_controller(site: str):
     try:
-        print(f"Fetching schema for site: {site}")
-        # Check if the site exists in the database
         schema = schema_service.get_schema(site)
         if schema is None:
             raise HTTPException(status_code=404, detail="Schema not found.")
