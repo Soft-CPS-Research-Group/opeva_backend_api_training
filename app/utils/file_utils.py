@@ -337,7 +337,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 f.write(",".join(map(str, row)) + "\n")
 
     def ev_format(data_aggregated, filename):
-
+        # Opena file
         with open(os.path.join(path, f"{filename}.csv"), "w") as f:
             # Write the CSV header
             f.write(",".join(settings.EV_DATASET_CSV_HEADER) + "\n")
