@@ -81,6 +81,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         raise ValueError(f"Missing 'schema' collection in site '{site_id}'")
 
     # Saves the buildings ids present in the schema for future data fetch
+    print(structure_doc)
     building_ids = list(structure_doc.get("buildings").keys())
 
     # TODO: Meto so corres que aparecem no schema?
