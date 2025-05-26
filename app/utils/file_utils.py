@@ -75,7 +75,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     collection_names = db.list_collection_names()
 
     # Fetch the structure from the special "schema" collection
-    structure_doc = db["schema"].find_one()
+    structure_doc = db["schema"].find_one().get("schema")
     # TODO: retornar este erro para o pedido
     if not structure_doc:
         raise ValueError(f"Missing 'schema' collection in site '{site_id}'")
