@@ -337,15 +337,16 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 f.write(",".join(map(str, row)) + "\n")
 
     def ev_format(data_aggregated, filename):
-        # Opena file
+        data_aggregated_dict = pd.DataFrame(data_aggregated).to_dict(orient="index")
+
         with open(os.path.join(path, f"{filename}.csv"), "w") as f:
             # Write the CSV header
             f.write(",".join(settings.EV_DATASET_CSV_HEADER) + "\n")
 
-            for timestamp, values in data_aggregated.items():
+            for timestamp, values in data_aggregated_dict.items():
                 row = []
                 print(type(values))
-                
+
                 for field in settings.EV_DATASET_CSV_HEADER:
                     row.append(str(values.get(field, "")))
 
