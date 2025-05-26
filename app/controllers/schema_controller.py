@@ -24,4 +24,5 @@ def get_schema_controller(site: str):
             raise HTTPException(status_code=404, detail="Schema not found.")
         return schema
     except Exception as e:
+        print(f"Error fetching schema for site {site}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
