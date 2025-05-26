@@ -344,6 +344,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
             for timestamp, values in data_aggregated.items():
                 row = []
+                print(values)
                 for field in settings.EV_DATASET_CSV_HEADER:
                     row.append(str(values.get(field, "")))
 
