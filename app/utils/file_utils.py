@@ -340,18 +340,63 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         data_aggregated_dict = pd.DataFrame(data_aggregated).to_dict(orient="index")
 
         with open(os.path.join(path, f"{filename}.csv"), "w") as f:
-            # Write the CSV header
+            # Write CSV header
             f.write(",".join(settings.EV_DATASET_CSV_HEADER) + "\n")
 
-            for timestamp, values in data_aggregated_dict.items():
+            timestamps = list(data_aggregated_dict.keys())
+
+            # Initialize auxiliary dictionary to hold last valid values
+            last_valid = {}
+
+            # Handle the first row separately
+            first_values = data_aggregated_dict[timestamps[0]]
+            filled_first = {}
+
+            # Look ahead to fill in NaNs in the first row using the next valid values
+            for field in settings.EV_DATASET_CSV_HEADER:
+                value = first_values.get(field, "")
+                if value is None or (isinstance(value, float) and math.isnan(value)) or (
+                        isinstance(value, str) and value.lower() == "nan"):
+                    # Search for the next valid value
+                    for j in range(1, len(timestamps)):
+                        next_value = data_aggregated_dict[timestamps[j]].get(field, "")
+                        if next_value is not None and not (
+                                isinstance(next_value, float) and math.isnan(next_value)) and not (
+                                isinstance(next_value, str) and next_value.lower() == "nan"):
+                            filled_first[field] = next_value
+                            break
+                    else:
+                        filled_first[field] = ""  # No valid value found
+                else:
+                    filled_first[field] = value
+
+            # Write the corrected first row and update last_valid
+            row = []
+            for field in settings.EV_DATASET_CSV_HEADER:
+                value = filled_first[field]
+                last_valid[field] = value
+                row.append(str(value))
+            f.write(",".join(row) + "\n")
+
+            # Handle the remaining rows
+            for i in range(1, len(timestamps)):
+                values = data_aggregated_dict[timestamps[i]]
                 row = []
-                print(type(values))
 
                 for field in settings.EV_DATASET_CSV_HEADER:
-                    row.append(str(values.get(field, "")))
+                    value = values.get(field, "")
 
-                # Write the row to the file
-                f.write(",".join(map(str, row)) + "\n")
+                    if value is None or (isinstance(value, float) and math.isnan(value)) or (
+                            isinstance(value, str) and value.lower() == "nan"):
+                        # Replace with last valid value
+                        value = last_valid.get(field, "")
+                    else:
+                        # Update last valid value
+                        last_valid[field] = value
+
+                    row.append(str(value))
+
+                f.write(",".join(row) + "\n")
 
 
     # Function to export data from a collection into a CSV file
@@ -386,7 +431,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 state = 1
 
                 # If there is not an user_id or power, it is considered that there is no car charging in the station
-                if session.get("user_id") != "" and session.get("power") != 0:
+                if session.get("user_id") != "":
                     state = 3
 
                 session_data = {
