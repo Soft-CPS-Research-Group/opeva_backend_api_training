@@ -338,11 +338,11 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     def ev_format(data_aggregated, filename):
 
-        with open(os.path.join(path, f"{file_name}.csv"), "w") as f:
+        with open(os.path.join(path, f"{filename}.csv"), "w") as f:
             # Write the CSV header
             f.write(",".join(settings.EV_DATASET_CSV_HEADER) + "\n")
 
-            for timestamp, values in data_missing_indices_filled.items():
+            for timestamp, values in data_aggregated.items():
                 row = []
                 for field in settings.EV_DATASET_CSV_HEADER:
                     row.append(str(values.get(field, "")))
