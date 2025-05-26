@@ -343,9 +343,9 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             f.write(",".join(settings.EV_DATASET_CSV_HEADER) + "\n")
 
             for timestamp, values in data_aggregated.items():
+                row = []
                 print(values)
 
-                row = []
                 for field in settings.EV_DATASET_CSV_HEADER:
                     row.append(str(values.get(field, "")))
 
