@@ -83,8 +83,6 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     building_ids = list(structure_doc.get("buildings").keys())
 
-    # TODO: Meto so corres que aparecem no schema?
-
     # Find collections that start with 'building_' followed by each building_id and are in the schema
     building_collections = [c for c in collection_names if
                             any(c.startswith(f"building_{building_id}") for building_id in building_ids)]
@@ -142,7 +140,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
         # Resample and aggregate the data using the specified aggregation rules per column
         # Example of aggregation_rules: {'temperature': 'mean', 'load': 'sum'}
-        aggregated_data = raw_data.resample(f'{period}min').agg(filtered_rules)
+        aggregated_data = raw_data.resample(f'{period}min').agg(filtered_rules) # TODO como fazer com as outras regras das charging sessions
 
         # Create a full timestamp range to ensure completeness of the time series
         full_datetime_index = pd.date_range(start=from_dt, end=until_dt, freq=f'{period}min', tz='UTC')
@@ -340,7 +338,6 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     def ev_format(data_aggregated, filename):
 
-
         with open(os.path.join(path, f"{file_name}.csv"), "w") as f:
             # Write the CSV header
             f.write(",".join(settings.EV_DATASET_CSV_HEADER) + "\n")
@@ -367,8 +364,8 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         elif header == settings.BUILDING_DATASET_CSV_HEADER:
             building_format(data_aggregated, file_name)
 
-        '''elif header == settings.EV_DATASET_CSV_HEADER:
-            ev_format(data_aggregated, file_name)'''
+        elif header == settings.EV_DATASET_CSV_HEADER:
+            ev_format(data_aggregated, file_name)
 
 
     charging_sessions_by_charger = {}
