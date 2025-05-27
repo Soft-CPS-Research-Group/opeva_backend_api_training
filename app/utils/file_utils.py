@@ -296,7 +296,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         data_missing_indices_filled = interpolate_missing_values(data_aggregated)
 
         data_missing_indices_filled = {timestamp: values for timestamp, values in data_missing_indices_filled.items() if
-                                       from_dt < pd.to_datetime(timestamp) <= until_dt}
+                                       from_dt <= pd.to_datetime(timestamp) < until_dt}
 
         data_missing_indices_filled = OrderedDict(sorted(data_missing_indices_filled.items()))
 
@@ -334,7 +334,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         data_missing_indices_filled = interpolate_missing_values(data_aggregated)
 
         data_missing_indices_filled = {timestamp: values for timestamp, values in data_missing_indices_filled.items() if
-                                       from_dt < pd.to_datetime(timestamp) <= until_dt}
+                                       from_dt <= pd.to_datetime(timestamp) < until_dt}
 
         data_missing_indices_filled = OrderedDict(sorted(data_missing_indices_filled.items()))
 
@@ -406,7 +406,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             # Write the corrected first row
             row = []
 
-            if from_dt < timestamp <= until_dt:
+            if from_dt <= timestamp < until_dt:
                 for field in settings.EV_DATASET_CSV_HEADER:
                     value = filled_first[field]
                     row.append(str(value))
@@ -431,7 +431,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                     filled_first.update(values)
 
                 row = [str(filled_first[field]) for field in settings.EV_DATASET_CSV_HEADER]
-                if from_dt < timestamp <= until_dt:
+                if from_dt <= timestamp < until_dt:
                     f.write(",".join(row) + "\n")
 
     # Function to export data from a collection into a CSV file
