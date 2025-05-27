@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     MONGO_HOST: str = "193.136.62.78"
     MONGO_PORT: int = 27017
     MONGO_AUTH_SOURCE: str = "admin"
+    ACCEPTABLE_GAP_IN_MINUTES: int = 60
+
 
     BUILDING_DATASET_CSV_HEADER: ClassVar[dict[str, str]] = {
         "month": "first",
