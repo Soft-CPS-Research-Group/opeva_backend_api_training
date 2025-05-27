@@ -4,6 +4,7 @@ from app.utils import mongo_utils
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from collections import OrderedDict
+from fastapi import HTTPException
 import numpy as np
 import pandas as pd
 import shutil
@@ -66,7 +67,9 @@ def parse_timestamp(ts):
 
     raise TypeError(f"Unsupported timestamp type: {type(ts)}")
 
-def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, from_ts: str = None, until_ts: str = None):
+
+def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, from_ts: str = None,
+                       until_ts: str = None):
     # Create the target dataset directory
     path = os.path.join(settings.DATASETS_DIR, name)
     os.makedirs(path, exist_ok=True)
@@ -75,13 +78,15 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     db = mongo_utils.get_db(site_id)
     collection_names = db.list_collection_names()
 
-    # Fetch the structure from the special "schema" collection
-    structure_doc = db["schema"].find_one().get("schema")
-    # TODO: retornar este erro para o pedido
-    if not structure_doc:
-        raise ValueError(f"Missing 'schema' collection in site '{site_id}'")
-    # Saves the buildings ids present in the schema for future data fetch
+    doc = db["schema"].find_one()
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Missing 'schema' collection in site '{site_id}'")
 
+    structure_doc = doc.get("schema")
+    if not structure_doc:
+        raise HTTPException(status_code=404, detail=f"Missing 'schema' document content in site '{site_id}'")
+
+    # Saves the buildings ids present in the schema for future data fetch
     building_ids = list(structure_doc.get("buildings").keys())
 
     # Find collections that start with 'building_' followed by each building_id and are in the schema
@@ -101,7 +106,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     relevant_ranges = [r for r in date_ranges if r["installation"] in building_collections]
 
     if not relevant_ranges:
-        raise ValueError("No available data found in the relevant collections.")
+        raise HTTPException(status_code=404, detail="No available data found in the relevant collections.")
 
     # Find the most recent start (latest of the oldest records)
     latest_start = max(parse_timestamp(r["oldest_record"]) for r in relevant_ranges)
@@ -115,8 +120,11 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         until_dt = earliest_end
 
     # Ensure the adjusted date range is valid
+    # TODO raise ValueError("Invalid time range: no data available for the given time period.")
     if from_dt >= until_dt:
-        raise ValueError("Invalid time range: no data available for the given time period.")
+        raise HTTPException(status_code=404, detail="Invalid time range: no data available for the given time period.")
+
+    acceptable_gap = max(1, int(settings.ACCEPTABLE_GAP_IN_MINUTES / period))
 
     # Utility function to determine if a datetime is in daylight savings time (Lisbon time zone)
     def is_daylight_savings(ts: datetime) -> int:
@@ -133,6 +141,8 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         # Set 'timestamp' as the index to allow time-based resampling
         raw_data.set_index('timestamp', inplace=True)
 
+        column_types = raw_data.dtypes.to_dict()
+
         filtered_rules = {
             col: rule
             for col, rule in aggregation_rules.items()
@@ -141,7 +151,18 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
         # Resample and aggregate the data using the specified aggregation rules per column
         # Example of aggregation_rules: {'temperature': 'mean', 'load': 'sum'}
-        aggregated_data = raw_data.resample(f'{period}min').agg(filtered_rules) # TODO como fazer com as outras regras das charging sessions
+        aggregated_data = raw_data.resample(f'{period}min').agg(
+            filtered_rules)  # TODO como fazer com as outras regras das charging sessions
+
+        # Restore original dtypes where possible, using pandas nullable types to preserve NaNs/None
+        for col, original_type in column_types.items():
+            if col in aggregated_data.columns:
+                if pd.api.types.is_integer_dtype(original_type):
+                    # Use nullable integer dtype 'Int64' to allow NaNs in integer columns
+                    aggregated_data[col] = aggregated_data[col].astype("Int64")
+                elif pd.api.types.is_float_dtype(original_type):
+                    # Ensure floats stay as float64 (supports NaN)
+                    aggregated_data[col] = aggregated_data[col].astype("float64")
 
         # Create a full timestamp range to ensure completeness of the time series
         full_datetime_index = pd.date_range(start=from_dt, end=until_dt, freq=f'{period}min', tz='UTC')
@@ -205,7 +226,6 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 values.append({'Date': datetime(1, 1, 1, 0, 0), 'Value': 0})
         return values
 
-
     def interpolate_missing_values(df):
         data = {}  # Dictionary to store interpolated values for all columns
         indexs = []  # List to store indices of missing values
@@ -225,7 +245,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             elif x > 0:
                 # If there were missing values, interpolate the values
                 # TODO alterar o valor de 6 para um valor que é okay fazer interpolação considerando o periodo
-                if x <= 6 and (indexs[0] - pd.Timedelta(hours=1)) in df.index and (
+                if x <= acceptable_gap and (indexs[0] - pd.Timedelta(hours=1)) in df.index and (
                         indexs[-1] + pd.Timedelta(hours=1)) in df.index:
                     # If the gap is small and there are valid values before and after
                     prev_values = df.loc[indexs[0] - pd.Timedelta(hours=1)].to_dict()  # Get the previous values
@@ -267,7 +287,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 # Reset the counter and index list for the next batch of missing values
                 x = 0
                 indexs = []
-        
+
         return data
 
     def building_format(data_aggregated, file_name):
@@ -276,7 +296,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         data_missing_indices_filled = interpolate_missing_values(data_aggregated)
 
         data_missing_indices_filled = {timestamp: values for timestamp, values in data_missing_indices_filled.items() if
-                                       from_dt <= pd.to_datetime(timestamp) <= until_dt}
+                                       from_dt < pd.to_datetime(timestamp) <= until_dt}
 
         data_missing_indices_filled = OrderedDict(sorted(data_missing_indices_filled.items()))
 
@@ -314,7 +334,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         data_missing_indices_filled = interpolate_missing_values(data_aggregated)
 
         data_missing_indices_filled = {timestamp: values for timestamp, values in data_missing_indices_filled.items() if
-                                       from_dt <= pd.to_datetime(timestamp) <= until_dt}
+                                       from_dt < pd.to_datetime(timestamp) <= until_dt}
 
         data_missing_indices_filled = OrderedDict(sorted(data_missing_indices_filled.items()))
 
@@ -339,6 +359,17 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
 
     def ev_format(data_aggregated, filename):
         data_aggregated_dict = pd.DataFrame(data_aggregated).to_dict(orient="index")
+        default_dict = {
+            "electric_vehicle_charger_state": 1,
+            "power": 0.0,
+            "electric_vehicle_id": "",
+            "electric_vehicle_battery_capacity_khw": 0.0,
+            "current_soc": 0,
+            "electric_vehicle_departure_time": "",
+            "electric_vehicle_required_soc_departure": 0,
+            "electric_vehicle_estimated_arrival_time": "",
+            "electric_vehicle_estimated_soc_arrival": 0
+        }
 
         with open(os.path.join(path, f"{filename}.csv"), "w") as f:
             # Write CSV header
@@ -347,58 +378,61 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
             timestamps = list(data_aggregated_dict.keys())
 
             # Initialize auxiliary dictionary to hold last valid values
-            last_valid = {}
+            max_gap_reached = 0
 
             # Handle the first row separately
-            first_values = data_aggregated_dict[timestamps[0]]
-            filled_first = {}
+            timestamp = timestamps[0]
+            first_values = data_aggregated_dict[timestamp]
+            filled_first = {
+                **{k: first_values.get(k, v) for k, v in default_dict.items()}
+            }
 
-            # Look ahead to fill in NaNs in the first row using the next valid values
-            for field in settings.EV_DATASET_CSV_HEADER:
-                value = first_values.get(field, "")
-                if value is None or (isinstance(value, float) and math.isnan(value)) or (
-                        isinstance(value, str) and value.lower() == "nan"):
-                    # Search for the next valid value
-                    for j in range(1, len(timestamps)):
-                        next_value = data_aggregated_dict[timestamps[j]].get(field, "")
-                        if next_value is not None and not (
-                                isinstance(next_value, float) and math.isnan(next_value)) and not (
-                                isinstance(next_value, str) and next_value.lower() == "nan"):
-                            filled_first[field] = next_value
-                            break
-                    else:
-                        filled_first[field] = ""  # No valid value found
-                else:
-                    filled_first[field] = value
+            value = first_values.get("electric_vehicle_charger_state", "")
+            if value is None or (isinstance(value, float) and math.isnan(value)) or (
+                    isinstance(value, str) and value.lower() == "nan"):
+                # Search for the next valid value
+                for j in range(1, acceptable_gap):
+                    next_values = data_aggregated_dict[timestamps[j]]
+                    next_value = next_values.get("electric_vehicle_charger_state", "")
+                    if next_value is not None and not (
+                            isinstance(next_value, float) and math.isnan(next_value)) and not (
+                            isinstance(next_value, str) and next_value.lower() == "nan"):
+                        filled_first.update(next_values)
+                        break
+            else:
+                for key, default_value in first_values.items():
+                    filled_first[key] = first_values.get(key, default_value)
 
-            # Write the corrected first row and update last_valid
+            # Write the corrected first row
             row = []
-            for field in settings.EV_DATASET_CSV_HEADER:
-                value = filled_first[field]
-                last_valid[field] = value
-                row.append(str(value))
-            f.write(",".join(row) + "\n")
+
+            if from_dt < timestamp <= until_dt:
+                for field in settings.EV_DATASET_CSV_HEADER:
+                    value = filled_first[field]
+                    row.append(str(value))
+                f.write(",".join(row) + "\n")
 
             # Handle the remaining rows
             for i in range(1, len(timestamps)):
-                values = data_aggregated_dict[timestamps[i]]
-                row = []
+                timestamp = timestamps[i]
+                values = data_aggregated_dict[timestamp]
 
-                for field in settings.EV_DATASET_CSV_HEADER:
-                    value = values.get(field, "")
+                value = values.get("electric_vehicle_charger_state", "")
+                if (value is None or (isinstance(value, float) and math.isnan(value)) or (
+                        isinstance(value, str) and value.lower() == "nan")):
+                    if max_gap_reached >= acceptable_gap:
+                        max_gap_reached = 0
+                        filled_first.update(default_dict)
 
-                    if value is None or (isinstance(value, float) and math.isnan(value)) or (
-                            isinstance(value, str) and value.lower() == "nan"):
-                        # Replace with last valid value
-                        value = last_valid.get(field, "")
                     else:
-                        # Update last valid value
-                        last_valid[field] = value
+                        max_gap_reached += 1
+                else:
+                    max_gap_reached = 0
+                    filled_first.update(values)
 
-                    row.append(str(value))
-
-                f.write(",".join(row) + "\n")
-
+                row = [str(filled_first[field]) for field in settings.EV_DATASET_CSV_HEADER]
+                if from_dt < timestamp <= until_dt:
+                    f.write(",".join(row) + "\n")
 
     # Function to export data from a collection into a CSV file
     def write_csv(docs, header, file_name):
@@ -406,16 +440,16 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         # The aggregation is performed based on the column labels, applying specific aggregation methods,
         # such as summing all values or calculating the average, as defined in the provided aggregation rules.
         data_aggregated = data_format(docs, header)
-        print(data_aggregated)
+
         if header == settings.PRICE_DATASET_CSV_HEADER:
-           price_format(data_aggregated, file_name)
+            price_format(data_aggregated, file_name)
 
         elif header == settings.BUILDING_DATASET_CSV_HEADER:
             building_format(data_aggregated, file_name)
 
         elif header == settings.EV_DATASET_CSV_HEADER:
+            print(data_aggregated)
             ev_format(data_aggregated, file_name)
-
 
     charging_sessions_by_charger = {}
     # Export all building-related collections
@@ -438,14 +472,14 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                 session_data = {
                     "timestamp": timestamp,
                     "electric_vehicle_charger_state": state,
-                    "power": session.get("power", 0),
+                    "power": session.get("power", 0.0),
                     "electric_vehicle_id": session.get("user_id", ""),
-                    "electric_vehicle_battery_capacity_khw": 0,   # TODO arranjar o que meter aqui
+                    "electric_vehicle_battery_capacity_khw": 0.0,  # TODO arranjar o que meter aqui
                     "current_soc": session.get("soc", 0),
-                    "electric_vehicle_departure_time": session.get("flexibility", {}).get("departure.time", 0),
+                    "electric_vehicle_departure_time": session.get("flexibility", {}).get("departure.time", ""),
                     "electric_vehicle_required_soc_departure": session.get("flexibility", {}).get("departure.soc", 0),
-                    "electric_vehicle_estimated_arrival_time": session.get("flexibility", {}).get("arrival.time", 0),
-                    "electric_vehicle_estimated_soc_arrival": 0   # TODO arranjar o que meter aqui
+                    "electric_vehicle_estimated_arrival_time": session.get("flexibility", {}).get("arrival.time", ""),
+                    "electric_vehicle_estimated_soc_arrival": 0  # TODO arranjar o que meter aqui
                 }
 
                 # TODO ir buscar ao schema o tamanho da bateria
@@ -453,7 +487,6 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
                     charging_sessions_by_charger[charger_id] = []
 
                 charging_sessions_by_charger[charger_id].append(session_data)
-
 
     for charger in charging_sessions_by_charger.keys():
         write_csv(charging_sessions_by_charger.get(charger), settings.EV_DATASET_CSV_HEADER, charger)
@@ -473,6 +506,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
         json.dump(schema, f, indent=2)
 
     return path
+
 
 def list_dates_available_per_collection(site_id: str):
     db = mongo_utils.get_db(site_id)
