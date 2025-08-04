@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     JOB_TRACK_FILE: str = os.path.join(VM_SHARED_DATA, "job_track.json")
     JOBS_DIR: str = os.path.join(VM_SHARED_DATA, "jobs")
     DATASETS_DIR: str = os.path.join(VM_SHARED_DATA, "datasets")
+    RAY_ADDRESS: str = "ray://ray-head:10001"
 
     AVAILABLE_HOSTS: list = [
         {"name": "local", "host": "local"},

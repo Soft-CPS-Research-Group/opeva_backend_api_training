@@ -1,12 +1,27 @@
+import json
 import os
 import re
-import yaml
-import json
 from uuid import uuid4
-from app.models.job import SimulationRequest, JobLaunchRequest
-from app.utils import docker_manager, job_utils, file_utils
-from app.config import settings
+
+import ray
+import yaml
 from fastapi import HTTPException
+
+from app.config import settings
+from app.models.job import JobLaunchRequest, SimulationRequest
+from app.utils import docker_manager, file_utils, job_utils
+
+ray_address = settings.RAY_ADDRESS
+try:
+    ray.init(address=ray_address, ignore_reinit_error=True)
+except Exception as exc:
+    raise RuntimeError(f"Could not connect to Ray at {ray_address}") from exc
+
+@ray.remote
+def run_simulation_task(job_id, sim_request_dict, target_host):
+    sim_request = SimulationRequest(**sim_request_dict)
+    container = docker_manager.run_simulation(job_id, sim_request, target_host)
+    return {"container_id": container.id, "container_name": container.name}
 
 jobs = job_utils.load_jobs()
 
@@ -31,28 +46,41 @@ async def launch_simulation(request: JobLaunchRequest):
         config_path = f"configs/{config_path}"
 
     sim_request = SimulationRequest(config_path=config_path, job_name=job_name)
-    container = docker_manager.run_simulation(job_id, sim_request, request.target_host)
+    task = run_simulation_task.remote(job_id, sim_request.dict(), request.target_host)
+    result = ray.get(task)
 
     job_metadata = {
-        "container_id": container.id,
-        "container_name": container.name,
+        "container_id": result["container_id"],
+        "container_name": result["container_name"],
         "job_name": job_name,
         "config_path": config_path,
         "target_host": request.target_host,
         "experiment_name": experiment_name,
         "run_name": run_name,
+        "ray_task_id": task.hex(),
     }
 
     job_utils.save_job(job_id, job_metadata)
-    job_utils.save_job_info(job_id, job_name, config_path, request.target_host, container.id, container.name, experiment_name, run_name)
+    job_utils.save_job_info(
+        job_id,
+        job_name,
+        config_path,
+        request.target_host,
+        result["container_id"],
+        result["container_name"],
+        experiment_name,
+        run_name,
+        task.hex(),
+    )
     jobs[job_id] = job_metadata
 
     return {
         "job_id": job_id,
-        "container_id": container.id,
+        "container_id": result["container_id"],
         "status": "launched",
         "host": request.target_host,
         "job_name": job_name,
+        "ray_task_id": task.hex(),
     }
 
 def get_status(job_id: str):

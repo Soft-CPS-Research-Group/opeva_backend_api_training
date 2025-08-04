@@ -86,6 +86,41 @@ It uses the shared `/opt/opeva_shared_data/` folder to store:
   - `progress/progress.json`
   - `job_info.json`
 
+## 🧠 Distributed Execution with Ray
+
+The API launches simulation containers through [Ray](https://www.ray.io/) remote tasks.
+To use this functionality you need a running Ray cluster. The backend
+automatically attempts to connect to a Ray head node at `ray://ray-head:10001`,
+which assumes a Ray container named **`ray-head`** is running on the same Docker
+network.
+
+1. **Start a Ray head container** (name it `ray-head` so the backend can find it):
+   ```bash
+   docker run --rm --name ray-head \
+     -p 6379:6379 -p 8265:8265 -p 10001:10001 \
+     --network opeva_network \
+     rayproject/ray:latest ray start --head --dashboard-host=0.0.0.0
+   ```
+2. **Run the backend container**. It will connect to `ray-head` automatically:
+   ```bash
+   docker run -p 8000:8000 --network opeva_network \
+     -v /opt/opeva_shared_data:/data opeva_backend_api_training
+   ```
+   To use a different Ray head, override the address:
+   ```bash
+   docker run -p 8000:8000 --network opeva_network \
+     -e RAY_ADDRESS="ray://<head-host>:10001" \
+     -v /opt/opeva_shared_data:/data opeva_backend_api_training
+   ```
+3. **Join additional worker machines** so they can run simulations:
+   ```bash
+   ray start --address='<head-ip>:6379'
+   ```
+
+The backend calls `ray.init(address=<configured>)` during startup. Simulation
+results and logs remain written under `/opt/opeva_shared_data/jobs/{job_id}/`
+just like before.
+
 ## Getting Started
 ### Requirements
 - Docker
