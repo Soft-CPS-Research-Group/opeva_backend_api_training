@@ -21,7 +21,7 @@ def save_job(job_id, metadata):
     with open(settings.JOB_TRACK_FILE, "w") as f:
         json.dump(jobs, f, indent=2)
 
-def save_job_info(job_id, job_name, config_path, host, container_id, container_name, exp, run):
+def save_job_info(job_id, job_name, config_path, host, container_id, container_name, exp, run, ray_task_id=None):
     job_dir = os.path.join(settings.JOBS_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
     info = {
@@ -34,6 +34,8 @@ def save_job_info(job_id, job_name, config_path, host, container_id, container_n
         "experiment_name": exp,
         "run_name": run,
     }
+    if ray_task_id is not None:
+        info["ray_task_id"] = ray_task_id
     with open(os.path.join(job_dir, "job_info.json"), "w") as f:
         json.dump(info, f, indent=2)
 
