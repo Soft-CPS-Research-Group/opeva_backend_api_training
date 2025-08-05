@@ -18,7 +18,7 @@ def ensure_ray_initialized():
     global _ray_initialized
     if not _ray_initialized:
         try:
-            ray.init(address=settings.RAY_ADDRESS, ignore_reinit_error=True, runtime_env={"working_dir": "/app"})
+            ray.init(address=settings.RAY_ADDRESS, ignore_reinit_error=True, runtime_env={"working_dir": "/app", "pip": "/app/requirements.txt"})
             _ray_initialized = True
         except Exception as exc:
             raise RuntimeError(f"Could not connect to Ray at {settings.RAY_ADDRESS}") from exc
