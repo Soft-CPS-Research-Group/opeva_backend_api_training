@@ -15,3 +15,7 @@ def delete_dataset(name: str):
     if not success:
         raise FileNotFoundError(f"Dataset {name} not found")
     return {"message": f"Dataset '{name}' deleted"}
+
+
+def get_dataset_file(name: str) -> str:
+    return file_utils.get_dataset_file(name)
