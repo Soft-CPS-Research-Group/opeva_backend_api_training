@@ -6,15 +6,8 @@ from app.utils.job_utils import load_jobs, get_job_log_path, is_valid_host
 
 jobs = load_jobs()
 
-def get_docker_client(target_host):
-    if target_host == "local":
-        return docker.DockerClient(base_url="unix://var/run/docker.sock")
-    return docker.DockerClient(base_url=f"ssh://{target_host}")
-
-def run_simulation(job_id, request: SimulationRequest, target_host):
-    if not is_valid_host(target_host):
-        raise ValueError(f"Invalid host: {target_host}")
-    client = get_docker_client(target_host)
+def run_simulation(job_id, request: SimulationRequest):
+    client = docker.DockerClient(base_url="unix://var/run/docker.sock")
     volumes = {settings.VM_SHARED_DATA: {"bind": "/data", "mode": "rw"}}
     container_name = f"opeva_sim_{job_id}_{request.job_name}"
     try:

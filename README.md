@@ -86,40 +86,94 @@ It uses the shared `/opt/opeva_shared_data/` folder to store:
   - `progress/progress.json`
   - `job_info.json`
 
-## 🧠 Distributed Execution with Ray
+## 🧠 Distributed Execution with Ray (Multi-Host Setup)
 
-The API launches simulation containers through [Ray](https://www.ray.io/) remote tasks.
-To use this functionality you need a running Ray cluster. The backend
-automatically attempts to connect to a Ray head node at `ray://ray-head:10001`,
-which assumes a Ray container named **`ray-head`** is running on the same Docker
-network.
+The OPEVA backend uses Ray to distribute simulation jobs across multiple machines. Each job is executed inside a Docker container, and all logs, results, and progress files are saved to a shared folder:
+/opt/opeva_shared_data/jobs/{job_id}/.
 
-1. **Start a Ray head container** (name it `ray-head` so the backend can find it):
-   ```bash
-   docker run --rm --name ray-head \
-     -p 6379:6379 -p 8265:8265 -p 10001:10001 \
-     --network opeva_network \
-     rayproject/ray:latest ray start --head --dashboard-host=0.0.0.0
-   ```
-2. **Run the backend container**. It will connect to `ray-head` automatically:
-   ```bash
-   docker run -p 8000:8000 --network opeva_network \
-     -v /opt/opeva_shared_data:/data opeva_backend_api_training
-   ```
-   To use a different Ray head, override the address:
-   ```bash
-   docker run -p 8000:8000 --network opeva_network \
-     -e RAY_ADDRESS="ray://<head-host>:10001" \
-     -v /opt/opeva_shared_data:/data opeva_backend_api_training
-   ```
-3. **Join additional worker machines** so they can run simulations:
-   ```bash
-   ray start --address='<head-ip>:6379'
-   ```
+### 📌 Requirements
+On All Machines (Backend, Head Node, Worker Nodes):
 
-The backend calls `ray.init(address=<configured>)` during startup. Simulation
-results and logs remain written under `/opt/opeva_shared_data/jobs/{job_id}/`
-just like before.
+    Shared folder mounted at: /opt/opeva_shared_dataUse NFS or equivalent to mount it identically across machines.
+
+    Docker installed and accessible (as user or via sudo)
+
+#### 🧠 1. Start Ray Head Node (Ray Cluster Coordinator)
+
+In the softcps server ensure the ray container is up. This node will coordinate tasks across the cluster.
+
+#### ⚙️ 2. Run the Backend (on the same or separate machine)
+
+In the softcps server ensure the backend container is up.
+
+#### 🧳 3. Add Worker Machines to the Ray Cluster
+
+You can add as many remote worker machines as you want. These machines will receive simulation jobs, run them inside Docker containers, and write outputs to the shared folder.
+✅ Steps to prepare a worker machine:
+
+##### Optionally, create a virtual environment (recommended but not required)
+
+    python3 -m venv rayenv
+    source rayenv/bin/activate
+
+##### Install required Python packages
+    pip install "ray[default]" docker
+
+##### Mount the shared storage (same as backend)
+    sudo mount -t nfs <your-server>:/opt/opeva_shared_data /opt/opeva_shared_data
+
+##### Join the Ray cluster (replace <head-ip> with the Ray head’s IP or hostname)
+    ray start --address=<head-ip>:6379
+
+🧪 4. Test the Distributed Setup
+
+Use the API to launch a simulation job. The job will be scheduled on any available Ray worker. The worker launches a Docker container with the config. Logs, results, and progress will be written to the shared folder: /opt/opeva_shared_data/jobs/<job_id>/
+
+⚠️ Notes
+
+    ❌ Worker nodes do not need to run the backend — only the Ray runtime.
+
+    ✅ Jobs are scheduled using @ray.remote tasks and Ray decides which worker runs each job.
+
+    ✅ You can run the backend and head on the same machine during development.
+
+    ⚙️ You can also tag workers with resources (e.g., gpu_node, docker_node) to target them explicitly.
+
+#### ✅ Quick Worker Setup Script (Optional)
+
+Use the join-ray-worker.sh on any remote machine. Change the ip on variables before executing it.
+
+    #!/bin/bash
+
+    # Set your variables
+    HEAD_IP="<head-ip>"
+    NFS_SERVER="<server-ip>"
+    MOUNT_POINT="/opt/opeva_shared_data"
+
+    # Create and activate virtual environment
+    if [ ! -d "rayenv" ]; then
+        python3 -m venv rayenv
+    fi
+    source rayenv/bin/activate
+
+    # Install dependencies if not installed
+    pip install --quiet "ray[default]" docker
+
+    # Mount NFS only if not mounted
+    if ! mountpoint -q "$MOUNT_POINT"; then
+        echo "Mounting shared storage..."
+        sudo mount -t nfs ${NFS_SERVER}:/opt/opeva_shared_data $MOUNT_POINT
+    else
+        echo "Shared storage already mounted."
+    fi
+
+    # Start Ray worker if not already running
+    if ! pgrep -f "ray::"; then
+        echo "Joining Ray cluster at ${HEAD_IP}..."
+        ray start --address=${HEAD_IP}:6379 --block
+    else
+        echo "Ray is already running."
+    fi
 
 ## Getting Started
 ### Requirements
