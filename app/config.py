@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         {"name": "local", "host": "local"},
         {"name": "gpu-server-1", "host": "192.168.1.100"},
         {"name": "gpu-server-2", "host": "192.168.1.101"},
-        {"name": "tiago-local-via-tunnel", "host": "tcp://127.0.0.1:23750"}
+        {"name": "tiago-local-via-tunnel", "host": "tcp://host.docker.internal:23750"}
     ]
 
     MONGO_USER: str = "runtimeUI"
