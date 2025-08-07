@@ -59,7 +59,13 @@ def get_status(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return {"job_id": job_id, "status": docker_manager.get_container_status(job["container_id"]) }
+    
+    target_host = job.get("target_host", "local")  # Fallback to local if missing
+    return {
+        "job_id": job_id,
+        "status": docker_manager.get_container_status(job["container_id"], target_host)
+    }
+
 
 def get_result(job_id: str):
     return file_utils.collect_results(job_id)
@@ -77,7 +83,12 @@ def stop_job(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return {"message": docker_manager.stop_container(job["container_id"])}
+    
+    target_host = job.get("target_host", "local")
+    return {
+        "message": docker_manager.stop_container(job["container_id"], target_host)
+    }
+
 
 def list_jobs():
     result = []

@@ -342,5 +342,117 @@ curl http://<IP>:8000/real-time-data/i-charging_headquarters
 curl "http://<IP>:8000/real-time-data/living_lab?minutes=60"
 ```
 
----
+
+
+
+# 🖥️ Setting Up a New Slave Host for OPEVA Backend
+
+This guide walks you through two key stages:
+
+🔧 Configure a new PC as a slave host (PC side + server side)
+
+🚀 Run jobs on the slave host (from the OPEVA server)
+
+## 1️⃣ CONFIGURE A NEW PC TO BE A SLAVE HOST
+
+🔒 On the Slave PC (your personal computer)
+
+✅ Requirements:
+
+Docker installed and working (use docker info to confirm)
+
+VPN to the ISEP network working (your PC must get a 10.8.0.X address)
+
+SSH access configured to the server (e.g., alias softcps works)
+
+📁 Folder Setup
+
+Create the local shared data folder:
+
+    sudo mkdir -p /opt/opeva_shared_data
+    sudo chown $USER:$USER /opt/opeva_shared_data
+
+🔁 (Recommended) Mount NFS Shared Folder from Server
+
+Install NFS client:
+
+    sudo apt update && sudo apt install nfs-common
+
+Mount manually:
+
+    sudo mount -t nfs softcps:/opt/opeva_shared_data /opt/opeva_shared_data
+
+🔐 Note: May require VPN and NFS ports open on the server:
+
+2049 (nfs), 111 (rpcbind), 20048 (mountd), 4045 (lockd), 32765-32768 (statd)
+
+To mount at boot or when VPN is up, you can edit /etc/fstab or use autofs.
+
+🔌 Create a reverse SSH tunnel script
+
+Create the file ~/bin/start_opeva_tunnel.sh with:
+
+    #!/bin/bash
+
+    REMOTE_HOST=softcps
+    REMOTE_PORT=23750
+    LOCAL_SOCK=/var/run/docker.sock
+
+    echo "[tunnel] Opening Docker tunnel to $REMOTE_HOST:$REMOTE_PORT..."
+    ssh -N -R $REMOTE_PORT:$LOCAL_SOCK $REMOTE_HOST
+
+Make it executable:
+
+    chmod +x ~/bin/start_opeva_tunnel.sh
+
+Run it manually after VPN is up:
+
+    ~/bin/start_opeva_tunnel.sh
+
+🔄 (Optional) Create Docker network (match server)
+
+docker network create opeva_network || true
+
+🖥️ On the Server (softcps VM)
+
+🗂️ Edit app/config.py
+
+Add your PC entry to the AVAILABLE_HOSTS list:
+
+    AVAILABLE_HOSTS: list = [
+        {"name": "local", "host": "local"},
+        {"name": "tiago_pc", "host": "tcp://127.0.0.1:23750"}  # reverse tunnel
+    ]
+
+✅ Confirm it's reachable
+
+From your PC, start the tunnel:
+
+    ~/bin/start_opeva_tunnel.sh
+
+Then on the server:
+
+      docker -H tcp://127.0.0.1:23750 info
+
+You should see the Docker info of your PC.
+
+## 2️⃣ RUN A JOB ON THE SLAVE HOST
+
+✅ Launch a simulation using your PC
+
+From the server:
+
+    curl -X POST http://localhost:8000/run-simulation \
+      -H "Content-Type: application/json" \
+      -d '{
+        "config_path": "configs/my_config.yaml",
+        "target_host": "tiago_pc"
+    }'
+
+🧪 Monitor the job
+
+    curl http://localhost:8000/status/{job_id}          # check status
+    curl http://localhost:8000/logs/{job_id}            # live logs
+    curl http://localhost:8000/progress/{job_id}        # progress file
+    curl http://localhost:8000/result/{job_id}          # final results
 

@@ -9,18 +9,32 @@ jobs = load_jobs()
 def get_docker_client(target_host):
     if target_host == "local":
         return docker.DockerClient(base_url="unix://var/run/docker.sock")
-    return docker.DockerClient(base_url=f"ssh://{target_host}")
+    elif target_host.startswith("tcp://"):
+        return docker.DockerClient(base_url=target_host)
+    else:
+        return docker.DockerClient(base_url=f"ssh://{target_host}")
 
 def run_simulation(job_id, request: SimulationRequest, target_host):
     if not is_valid_host(target_host):
         raise ValueError(f"Invalid host: {target_host}")
-    client = get_docker_client(target_host)
+
+    # RESOLVE o host real a partir do nome (se aplicável)
+    host_entry = next((h for h in settings.AVAILABLE_HOSTS if h["name"] == target_host), None)
+    if host_entry:
+        docker_host = host_entry["host"]
+    else:
+        docker_host = target_host
+
+    client = get_docker_client(docker_host)
+
     volumes = {settings.VM_SHARED_DATA: {"bind": "/data", "mode": "rw"}}
     container_name = f"opeva_sim_{job_id}_{request.job_name}"
+
     try:
         client.containers.get(container_name).remove(force=True)
     except docker.errors.NotFound:
         pass
+
     return client.containers.run(
         image="calof/opeva_simulator:latest",
         name=container_name,
@@ -29,15 +43,22 @@ def run_simulation(job_id, request: SimulationRequest, target_host):
         detach=True
     )
 
-def get_container_status(container_id):
+
+def get_container_status(container_id, target_host):
+    host_entry = next((h for h in settings.AVAILABLE_HOSTS if h["name"] == target_host), None)
+    docker_host = host_entry["host"] if host_entry else target_host
+    client = get_docker_client(docker_host)
     try:
-        return docker.from_env().containers.get(container_id).status
+        return client.containers.get(container_id).status
     except:
         return "not_found"
 
-def stop_container(container_id):
+def stop_container(container_id, target_host):
+    host_entry = next((h for h in settings.AVAILABLE_HOSTS if h["name"] == target_host), None)
+    docker_host = host_entry["host"] if host_entry else target_host
+    client = get_docker_client(docker_host)
     try:
-        docker.from_env().containers.get(container_id).stop()
+        client.containers.get(container_id).stop()
         return "stopped"
     except:
         return "not_found"

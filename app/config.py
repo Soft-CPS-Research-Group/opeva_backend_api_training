@@ -9,12 +9,12 @@ class Settings(BaseSettings):
     JOB_TRACK_FILE: str = os.path.join(VM_SHARED_DATA, "job_track.json")
     JOBS_DIR: str = os.path.join(VM_SHARED_DATA, "jobs")
     DATASETS_DIR: str = os.path.join(VM_SHARED_DATA, "datasets")
-    RAY_ADDRESS: str = "ray://ray-head:10001"
 
     AVAILABLE_HOSTS: list = [
         {"name": "local", "host": "local"},
         {"name": "gpu-server-1", "host": "192.168.1.100"},
-        {"name": "gpu-server-2", "host": "192.168.1.101"}
+        {"name": "gpu-server-2", "host": "192.168.1.101"},
+        {"name": "tiago-local-via-tunnel", "host": "tcp://127.0.0.1:23750"}
     ]
 
     MONGO_USER: str = "runtimeUI"
