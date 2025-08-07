@@ -63,6 +63,7 @@ def stop_container(container_id, target_host):
     except:
         return "not_found"
 
+
 def stream_container_logs(container_id):
     for job_id, meta in jobs.items():
         if meta.get("container_id") == container_id:

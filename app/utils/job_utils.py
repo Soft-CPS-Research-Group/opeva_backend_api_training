@@ -57,4 +57,4 @@ def get_available_hosts():
     return settings.AVAILABLE_HOSTS
 
 def is_valid_host(target_host: str) -> bool:
-    return any(h["host"] == target_host for h in settings.AVAILABLE_HOSTS)
+    return any(h["name"] == target_host for h in settings.AVAILABLE_HOSTS)
