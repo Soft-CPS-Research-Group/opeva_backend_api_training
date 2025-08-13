@@ -8,14 +8,10 @@ class Settings(BaseSettings):
     CONFIGS_DIR: str = os.path.join(VM_SHARED_DATA, "configs")
     JOB_TRACK_FILE: str = os.path.join(VM_SHARED_DATA, "job_track.json")
     JOBS_DIR: str = os.path.join(VM_SHARED_DATA, "jobs")
-    DATASETS_DIR: str = os.path.join(VM_SHARED_DATA, "datasets")
+    QUEUE_DIR: str = os.path.join(VM_SHARED_DATA, "queue")  # for agent jobs
 
-    AVAILABLE_HOSTS: list = [
-        {"name": "local", "host": "local"},
-        {"name": "gpu-server-1", "host": "192.168.1.100"},
-        {"name": "gpu-server-2", "host": "192.168.1.101"},
-        {"name": "tiago-local-via-tunnel", "host": "tcp://docker-host:23750"}
-    ]
+    # NEW: hosts are just names now. "local" = run on server; any other name = agent queue
+    AVAILABLE_HOSTS: list[str] = ["local", "gpu-server-1", "gpu-server-2", "tiago-laptop"]
 
     MONGO_USER: str = "runtimeUI"
     MONGO_PASSWORD: str = "runtimeUIDB"
