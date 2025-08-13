@@ -129,18 +129,35 @@ async def launch_simulation(request: JobLaunchRequest):
     return {"job_id": job_id, "status": JobStatus.QUEUED.value, "host": worker_id, "job_name": job_name}
 
 # ---------- API: status/result/progress/logs ----------
+
 def get_status(job_id: str):
     jobs = job_utils.load_jobs()
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
 
+    # Local jobs: inspect container phase + exit code to map to our enum
     if job.get("target_host") == "local" and job.get("container_id"):
-        docker_status = docker_manager.get_container_status(job["container_id"])
-        if docker_status and docker_status != JobStatus.NOT_FOUND.value:
-            return {"job_id": job_id, "status": docker_status}
+        phase, exit_code = docker_manager.get_container_phase(job["container_id"])
+        if phase == "running":
+            return {"job_id": job_id, "status": JobStatus.RUNNING.value}
+        if phase == "exited":
+            # Map exit code → FINISHED/FAILED and persist once, so future calls are fast
+            mapped = JobStatus.FINISHED.value if (exit_code == 0) else JobStatus.FAILED.value
+            _write_status(job_id, mapped, {"exit_code": exit_code})
+            return {"job_id": job_id, "status": mapped}
+        if phase == "not_found":
+            # fall back to file (maybe agent/file already set terminal state)
+            status = _read_status_file(job_id) or JobStatus.NOT_FOUND.value
+            return {"job_id": job_id, "status": status}
+        # unknown → fall back to file
+        status = _read_status_file(job_id) or JobStatus.UNKNOWN.value
+        return {"job_id": job_id, "status": status}
+
+    # Remote jobs (or local without container_id): file is authoritative
     status = _read_status_file(job_id) or job.get("status", JobStatus.UNKNOWN.value)
     return {"job_id": job_id, "status": status}
+
 
 def get_result(job_id: str):
     return file_utils.collect_results(job_id)
