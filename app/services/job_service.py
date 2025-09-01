@@ -1,10 +1,21 @@
+
+import json
+import os
+import re
+import time
+
 # app/services/job_service.py
 import os, re, json, yaml
+
 from uuid import uuid4
 from typing import Generator, Optional
 from fastapi import HTTPException, Response
 
 from app.config import settings
+
+from app.models.job import JobLaunchRequest, SimulationRequest, JobStatus
+from app.utils import docker_manager, file_utils, job_utils
+
 from app.models.job import SimulationRequest, JobLaunchRequest
 from app.utils import docker_manager, job_utils, file_utils
 from app.status import JobStatus
@@ -21,6 +32,7 @@ def _status_path(job_id: str) -> str:
 
 def _info_path(job_id: str) -> str:
     return os.path.join(_job_dir(job_id), "job_info.json")
+
 
 def _log_dir(job_id: str) -> str:
     return os.path.join(_job_dir(job_id), "logs")
@@ -76,15 +88,24 @@ async def launch_simulation(request: JobLaunchRequest):
     if not config_path.startswith("configs/"):
         config_path = f"configs/{config_path}"
 
+
+    sim_request = SimulationRequest(config_path=config_path, job_name=job_name)
+    job_metadata = {
+
     os.makedirs(_log_dir(job_id), exist_ok=True)
     meta = {
         "job_id": job_id,
+
         "job_name": job_name,
         "config_path": config_path,
         "target_host": request.target_host,
         "experiment_name": experiment_name,
         "run_name": run_name,
+
+        "status": JobStatus.PENDING.value,
+
         "status": JobStatus.LAUNCHING.value,
+
     }
     job_utils.save_job(job_id, meta)
     job_utils.save_job_info(job_id, job_name, config_path, request.target_host,
@@ -107,6 +128,45 @@ async def launch_simulation(request: JobLaunchRequest):
             "job_name": job_name,
         }
 
+
+    job_utils.save_job(job_id, job_metadata)
+    jobs[job_id] = job_metadata
+
+    task = run_simulation_task.remote(job_id, sim_request.dict(), request.target_host)
+    result = ray.get(task)
+
+    status = JobStatus.DISPATCHED.value
+    if request.target_host == "local":
+        status = JobStatus.RUNNING.value
+
+    job_metadata.update({
+        "container_id": result["container_id"],
+        "container_name": result["container_name"],
+        "ray_task_id": task.hex(),
+        "status": status,
+    })
+    job_utils.save_job(job_id, job_metadata)
+    job_utils.save_job_info(
+        job_id,
+        job_name,
+        config_path,
+        request.target_host,
+        result["container_id"],
+        result["container_name"],
+        experiment_name,
+        run_name,
+        task.hex(),
+    )
+    jobs[job_id] = job_metadata
+
+    return {
+        "job_id": job_id,
+        "container_id": result["container_id"],
+        "status": status,
+        "host": request.target_host,
+        "job_name": job_name,
+        "ray_task_id": task.hex(),
+
     # enqueue for agent (agent applies GPU/network defaults)
     sim_req = SimulationRequest(config_path=config_path, job_name=job_name)
     payload = {
@@ -120,6 +180,7 @@ async def launch_simulation(request: JobLaunchRequest):
         "env": {
             "MLFLOW_TRACKING_URI": "http://MAIN-SERVER:5000"
         }
+
     }
     worker_id = request.target_host
     job_utils.enqueue_job_for_agent(worker_id, payload)
@@ -134,6 +195,27 @@ def get_status(job_id: str):
     jobs = job_utils.load_jobs()
     job = jobs.get(job_id)
     if not job:
+
+        raise HTTPException(status_code=404, detail="Job not found")
+    container_status, exit_code = docker_manager.get_container_status(job["container_id"])
+    if container_status == "running":
+        status = JobStatus.RUNNING.value
+    elif container_status == "exited":
+        status = JobStatus.COMPLETED.value if exit_code == 0 else JobStatus.FAILED.value
+    elif container_status in ("created", "restarting"):
+        if job.get("target_host") == "local":
+            status = JobStatus.RUNNING.value
+        else:
+            status = JobStatus.DISPATCHED.value
+    elif container_status == "stopped":
+        status = JobStatus.STOPPED.value
+    elif container_status == "not_found":
+        status = job.get("status", JobStatus.FAILED.value)
+    else:
+        status = JobStatus.FAILED.value
+    job["status"] = status
+    job_utils.save_job(job_id, job)
+    return {"job_id": job_id, "status": status}
         raise HTTPException(404, "Job not found")
 
     # Local jobs: inspect container phase + exit code to map to our enum
@@ -193,6 +275,13 @@ def stop_job(job_id: str):
     jobs = job_utils.load_jobs()
     job = jobs.get(job_id)
     if not job:
+
+        raise HTTPException(status_code=404, detail="Job not found")
+    message = docker_manager.stop_container(job["container_id"])
+    job["status"] = JobStatus.STOPPED.value
+    job_utils.save_job(job_id, job)
+    return {"message": message, "status": job["status"]}
+
         raise HTTPException(404, "Job not found")
 
     host = job.get("target_host", "local")
@@ -218,15 +307,25 @@ def stop_job(job_id: str):
             return {"message": "Remote stop requires agent support; not implemented"}
         return {"message": f"Remote job is {status_now}; nothing to stop"}
 
+
 def list_jobs():
     jobs = job_utils.load_jobs()
     result = []
+
+    for job_id in list(jobs.keys()):
+        status_resp = get_status(job_id)
+        info_path = os.path.join("/opt/opeva_shared_data", "jobs", job_id, "job_info.json")
+
     for job_id, job in jobs.items():
+
         info = {}
         ipath = _info_path(job_id)
         if os.path.exists(ipath):
             with open(ipath) as f:
                 info = json.load(f)
+
+        result.append({"job_id": job_id, "status": status_resp["status"], "job_info": info})
+
 
         if job.get("target_host") == "local" and job.get("container_id"):
             status = docker_manager.get_container_status(job["container_id"])
@@ -236,6 +335,7 @@ def list_jobs():
             status = _read_status_file(job_id) or job.get("status", JobStatus.UNKNOWN.value)
 
         result.append({"job_id": job_id, "status": status, "job_info": info})
+
     return result
 
 def get_job_info(job_id: str):
@@ -253,6 +353,28 @@ def delete_job(job_id: str):
     if not ok:
         raise HTTPException(500, "Failed to delete job")
     return {"message": f"Job {job_id} deleted successfully"}
+
+def get_file_logs(job_id: str):
+    log_dir = os.path.join("/opt/opeva_shared_data", "jobs", job_id, "logs")
+    if not os.path.exists(log_dir):
+        raise HTTPException(status_code=404, detail="Log folder not found for this job")
+    for filename in os.listdir(log_dir):
+        if filename.endswith(".log"):
+            path = os.path.join(log_dir, filename)
+            def read_log():
+                with open(path) as f:
+                    while True:
+                        line = f.readline()
+                        if line:
+                            yield line
+                        else:
+                            status_resp = get_status(job_id)["status"]
+                            if status_resp == JobStatus.RUNNING.value:
+                                time.sleep(0.5)
+                                continue
+                            break
+            return read_log()
+    raise HTTPException(status_code=404, detail="Log file not found in logs folder")
 
 def get_hosts():
     return {"available_hosts": settings.AVAILABLE_HOSTS}

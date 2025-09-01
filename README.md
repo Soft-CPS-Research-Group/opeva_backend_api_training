@@ -76,30 +76,35 @@ Jobs move through the following states:
 
 ## API Overview
 
-| Method | Endpoint                                | Description |
-|--------|-----------------------------------------|-------------|
-| POST   | `/run-simulation`                       | Launch new simulation job |
-| GET    | `/status/{job_id}`                      | Get job status |
-| GET    | `/result/{job_id}`                      | Retrieve results |
-| GET    | `/progress/{job_id}`                    | Retrieve progress JSON |
-| GET    | `/logs/{job_id}`                        | Stream stdout logs |
-| GET    | `/logs/file/{job_id}`                   | Stream training log file |
-| POST   | `/stop/{job_id}`                        | Stop a running job |
-| GET    | `/jobs`                                 | List all jobs |
-| GET    | `/job-info/{job_id}`                    | Get job metadata |
-| DELETE | `/job/{job_id}`                         | Delete job folder & metadata |
-| GET    | `/hosts`                                | List available hosts |
-| POST   | `/experiment-config/create`             | Create new config file |
-| GET    | `/experiment-configs`                   | List config files |
-| GET    | `/experiment-config/{file}`             | View a config |
-| DELETE | `/experiment-config/{file}`             | Delete a config |
-| POST   | `/dataset`                              | Create dataset from MongoDB |
-| GET    | `/datasets`                             | List datasets |
-| DELETE | `/dataset/{name}`                       | Delete dataset |
-| GET    | `/sites`                                | List MongoDB sites |
-| GET    | `/real-time-data/{site}`                | Retrieve real-time MongoDB data |
-| GET    | `/health`                               | API health check |
-
+| Method | Endpoint                                | Description                                                                 |
+|--------|-----------------------------------------|-----------------------------------------------------------------------------|
+| GET    | /sites                                  | List available MongoDB databases (each representing a "site")              |
+| GET    | /real-time-data/{site_name}             | Retrieve all collections and documents from the specified MongoDB site     |
+| GET    | /real-time-data/{site_name}?minutes=X   | Retrieve only documents from the last X minutes across all collections     |
+| POST   | /run-simulation                         | Launch a new simulation job                                                |
+| GET    | /status/{job_id}                        | Check job status                                                           |
+| GET    | /result/{job_id}                        | Get final results of job                                                   |
+| GET    | /progress/{job_id}                      | Get progress updates                                                       |
+| GET    | /logs/{job_id}                          | Stream container logs                                                      |
+| GET    | /logs/file/{job_id}                     | Stream simulation log file (.log)                                          |
+| POST   | /stop/{job_id}                          | Stop a running container/job                                               |
+| GET    | /jobs                                   | List all tracked jobs                                                      |
+| GET    | /job-info/{job_id}                      | Get metadata about a job                                                   |
+| DELETE | /job/{job_id}                           | Delete job and its files                                                   |
+| GET    | /health                                 | Health check of the API                                                    |
+| POST   | /experiment-configs/create              | Create new config file                                                     |
+| GET    | /experiment-configs                     | List all config files                                                      |
+| GET    | /experiment-configs/{file}              | View a config file                                                         |
+| DELETE | /experiment-configs/{file}              | Delete a config file                                                       |
+| POST   | /dataset                                | Create a new dataset from a MongoDB site (buildings + EVs to CSVs)         |
+| GET    | /datasets                               | List all available datasets with metadata      |
+| GET    | /dataset/download/{name}                | Download a dataset (zips directories)          |
+| DELETE | /dataset/{name}                         | Delete a dataset and its contents                                          |
+| GET    | /dataset/dates-available/{site}         | Check available dates to generate a dataset                                |
+| GET    | /hosts                                  | List all available hosts                                                   |
+| POST   | /schema/create                          | Create a new site with its schema. Fails if the site already exists.     |
+| PUT    | /schema/update/{site}                   | Update the schema for an existing site.                                  |
+| GET    | /schema/{site}                          | Retrieve the schema for a specific site.                                 |
 ---
 
 ## 1️⃣ Server Setup (Main Server)
@@ -116,11 +121,45 @@ sudo mkdir -p /opt/opeva_shared_data
 sudo chown $USER:$USER /opt/opeva_shared_data
 ```
 
+
+## Logs and Results
+Simulation outputs are persisted under `/opt/opeva_shared_data/jobs/{job_id}/`:
+- Logs: `logs/{job_id}.log`
+- Results: `results/result.json`
+- Progress: `progress/progress.json`
+- Metadata: `job_info.json`
+
+## Job States
+Jobs transition through these states:
+- `pending` – request recorded before the container starts
+- `dispatched` – job handed off to a remote host and awaiting start
+- `running` – simulation executing inside the container (local jobs skip `dispatched`)
+- `completed` – container exited successfully
+- `failed` – container exited with an error code
+- `stopped` – job manually terminated via the API
+
+Retrieve the current state with `GET /status/{job_id}`. Progress updates remain
+on disk so clients can poll `GET /progress/{job_id}` whenever they need the
+latest values.
+
+---
+
+## 😓 Best Practices & Gotchas
+
+✅ Always point to `/data/` for datasets/configs inside containers  
+✅ Use inline config when launching dynamically from UI  
+✅ Always mount `/opt/opeva_shared_data` as `/data` in containers  
+
+❌ Do **not** use relative paths like `./datasets/...` in configs  
+❌ Do **not** rely on container stdout logs — use the generated `.log` files
+
+---
 ### Export via NFS
 Edit `/etc/exports`:
 ```
 /opt/opeva_shared_data *(rw,sync,no_subtree_check)
 ```
+
 
 Apply changes:
 ```
@@ -205,7 +244,24 @@ curl -X POST http://SERVER:8000/run-simulation   -H "Content-Type: application/j
 
 ---
 
+
+### 📃 List Datasets
+List dataset names along with size and creation time.
+```bash
+curl http://<IP>:8000/datasets
+```
+
+### 💾 Download Dataset
+```bash
+curl -L http://<IP>:8000/dataset/download/dataset1 -o dataset1.zip
+```
+
+### ❌ Delete Dataset
+```bash
+curl -X DELETE http://<IP>:8000/dataset/dataset1
+
 ## 4️⃣ Monitoring & Stopping Jobs
+
 
 ```
 curl http://SERVER:8000/status/{job_id}

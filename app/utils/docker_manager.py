@@ -1,5 +1,10 @@
 # app/utils/docker_manager.py
 import docker
+
+import os
+import time
+from app.config import settings
+
 from app.models.job import SimulationRequest
 from app.status import JobStatus
 
@@ -31,6 +36,14 @@ def get_container_phase(container_id: str) -> tuple[str, int | None]:
     """
     client = get_docker_client()
     try:
+
+        container = docker.from_env().containers.get(container_id)
+        status = container.status
+        exit_code = container.attrs.get("State", {}).get("ExitCode")
+        return status, exit_code
+    except Exception:
+        return "not_found", None
+
         c = client.containers.get(container_id)
         # ensure attrs are fresh
         c.reload()
@@ -49,6 +62,7 @@ def get_container_phase(container_id: str) -> tuple[str, int | None]:
         return ("unknown", None)
     except Exception:
         return ("not_found", None)
+
 
 def get_container_status(container_id: str) -> str:
     """(Optional legacy) Return raw-ish status for compatibility."""
@@ -69,3 +83,24 @@ def stop_container(container_id: str) -> str:
         return "stopped"
     except Exception:
         return "not_found"
+
+
+def stream_container_logs(container_id):
+    for job_id, meta in jobs.items():
+        if meta.get("container_id") == container_id:
+            log_file = get_job_log_path(job_id)
+            if os.path.exists(log_file):
+                with open(log_file) as f:
+                    while True:
+                        line = f.readline()
+                        if line:
+                            yield line
+                        else:
+                            status, _ = get_container_status(container_id)
+                            if status == "running":
+                                time.sleep(0.5)
+                                continue
+                            break
+                return
+    yield f"Log not found for container ID: {container_id}"
+

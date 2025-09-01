@@ -34,4 +34,11 @@ async def download_dataset(name: str):
 
 @router.delete("/dataset/{name}")
 async def delete_dataset(name: str):
+
+    try:
+        return dataset_controller.delete_dataset(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
     return dataset_controller.delete_dataset(name)
+

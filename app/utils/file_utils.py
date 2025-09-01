@@ -37,6 +37,7 @@ def delete_config_by_name(file_name):
         return True
     return False
 
+
 def collect_results(job_id):
     path = os.path.join(settings.JOBS_DIR, job_id, "results", "result.json")
     if os.path.exists(path):
@@ -48,7 +49,8 @@ def read_progress(job_id):
     path = os.path.join(settings.JOBS_DIR, job_id, "progress", "progress.json")
     if os.path.exists(path):
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
+        return data
     return {"progress": "No updates yet."}
 
 # Utility function to convert timestamp strings to datetime objects
