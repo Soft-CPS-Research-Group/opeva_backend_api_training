@@ -166,7 +166,8 @@ This will start:
 | GET    | /experiment-configs/{file}              | View a config file                                                         |
 | DELETE | /experiment-configs/{file}              | Delete a config file                                                       |
 | POST   | /dataset                                | Create a new dataset from a MongoDB site (buildings + EVs to CSVs)         |
-| GET    | /datasets                               | List all available datasets                                                |
+| GET    | /datasets                               | List all available datasets with metadata      |
+| GET    | /dataset/download/{name}                | Download a dataset (zips directories)          |
 | DELETE | /dataset/{name}                         | Delete a dataset and its contents                                          |
 | GET    | /dataset/dates-available/{site}         | Check available dates to generate a dataset                                |
 | GET    | /hosts                                  | List all available hosts                                                   |
@@ -199,6 +200,19 @@ Simulation outputs are persisted under `/opt/opeva_shared_data/jobs/{job_id}/`:
 - Results: `results/result.json`
 - Progress: `progress/progress.json`
 - Metadata: `job_info.json`
+
+## Job States
+Jobs transition through these states:
+- `pending` – request recorded before the container starts
+- `dispatched` – job handed off to a remote host and awaiting start
+- `running` – simulation executing inside the container (local jobs skip `dispatched`)
+- `completed` – container exited successfully
+- `failed` – container exited with an error code
+- `stopped` – job manually terminated via the API
+
+Retrieve the current state with `GET /status/{job_id}`. Progress updates remain
+on disk so clients can poll `GET /progress/{job_id}` whenever they need the
+latest values.
 
 ---
 
@@ -346,8 +360,14 @@ curl -X POST http://<IP>:8000/dataset \
 ```
 
 ### 📃 List Datasets
+List dataset names along with size and creation time.
 ```bash
 curl http://<IP>:8000/datasets
+```
+
+### 💾 Download Dataset
+```bash
+curl -L http://<IP>:8000/dataset/download/dataset1 -o dataset1.zip
 ```
 
 ### ❌ Delete Dataset

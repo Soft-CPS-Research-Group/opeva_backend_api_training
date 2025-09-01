@@ -11,3 +11,7 @@ def list_datasets():
 
 def delete_dataset(name: str):
     return dataset_service.delete_dataset(name)
+
+
+def download_dataset(name: str):
+    return dataset_service.get_dataset_file(name)

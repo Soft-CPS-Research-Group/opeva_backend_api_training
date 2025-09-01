@@ -1,15 +1,18 @@
 import os, json, yaml, base64
-from app.config import settings
-from app.utils import mongo_utils
+import tempfile
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from collections import OrderedDict
-from fastapi import HTTPException
-import numpy as np
-import pandas as pd
 import shutil
 import logging
 import math
+
+import numpy as np
+import pandas as pd
+from fastapi import HTTPException
+
+from app.config import settings
+from app.utils import mongo_utils
 
 def save_config_dict(config: dict, file_name: str) -> str:
     full_path = os.path.join(settings.CONFIGS_DIR, file_name)
@@ -34,6 +37,7 @@ def delete_config_by_name(file_name):
         return True
     return False
 
+
 def collect_results(job_id):
     path = os.path.join(settings.JOBS_DIR, job_id, "results", "result.json")
     if os.path.exists(path):
@@ -45,7 +49,8 @@ def read_progress(job_id):
     path = os.path.join(settings.JOBS_DIR, job_id, "progress", "progress.json")
     if os.path.exists(path):
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
+        return data
     return {"progress": "No updates yet."}
 
 # Utility function to convert timestamp strings to datetime objects
@@ -540,12 +545,56 @@ def list_dates_available_per_collection(site_id: str):
 
     return results
 
+def _get_path_size(path: str) -> int:
+    """Return total size in bytes for a file or directory."""
+    if os.path.isfile(path):
+        return os.path.getsize(path)
+    total = 0
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            try:
+                total += os.path.getsize(fp)
+            except OSError:
+                pass
+    return total
+
+
 def list_available_datasets():
-    return [d for d in os.listdir(settings.DATASETS_DIR) if os.path.isdir(os.path.join(settings.DATASETS_DIR, d))]
+    datasets = []
+    if not os.path.exists(settings.DATASETS_DIR):
+        return datasets
+
+    for name in os.listdir(settings.DATASETS_DIR):
+        path = os.path.join(settings.DATASETS_DIR, name)
+        if not os.path.exists(path):
+            continue
+        size = _get_path_size(path)
+        created_at = datetime.fromtimestamp(os.path.getctime(path)).isoformat()
+        datasets.append({"name": name, "size": size, "created_at": created_at})
+    return datasets
+
+
+def get_dataset_file(name: str) -> str:
+    """Return a path to the dataset file. If the dataset is a directory it will be zipped."""
+    path = os.path.join(settings.DATASETS_DIR, name)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Dataset {name} not found")
+
+    if os.path.isdir(path):
+        tmp_dir = tempfile.gettempdir()
+        archive_base = os.path.join(tmp_dir, name)
+        archive_path = shutil.make_archive(archive_base, 'zip', path)
+        return archive_path
+    return path
+
 
 def delete_dataset_by_name(name: str) -> bool:
     path = os.path.join(settings.DATASETS_DIR, name)
-    if os.path.exists(path) and os.path.isdir(path):
-        shutil.rmtree(path)
+    if os.path.exists(path):
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
         return True
     return False
