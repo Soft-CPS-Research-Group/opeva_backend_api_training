@@ -1,3 +1,4 @@
+# app/utils/job_utils.py
 import os, json, shutil
 from app.config import settings
 
@@ -5,6 +6,7 @@ def ensure_directories():
     os.makedirs(settings.CONFIGS_DIR, exist_ok=True)
     os.makedirs(settings.JOBS_DIR, exist_ok=True)
     os.makedirs(settings.DATASETS_DIR, exist_ok=True)
+    os.makedirs(settings.QUEUE_DIR, exist_ok=True)
     if not os.path.exists(settings.JOB_TRACK_FILE):
         with open(settings.JOB_TRACK_FILE, "w") as f:
             json.dump({}, f)
@@ -39,6 +41,15 @@ def save_job_info(job_id, job_name, config_path, host, container_id, container_n
     with open(os.path.join(job_dir, "job_info.json"), "w") as f:
         json.dump(info, f, indent=2)
 
+def write_status_file(job_id: str, status: str, extra: dict | None = None):
+    job_dir = os.path.join(settings.JOBS_DIR, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    payload = {"job_id": job_id, "status": status}
+    if extra:
+        payload.update(extra)
+    with open(os.path.join(job_dir, "status.json"), "w") as f:
+        json.dump(payload, f, indent=2)
+
 def delete_job_by_id(job_id: str, jobs: dict) -> bool:
     job_path = os.path.join(settings.JOBS_DIR, job_id)
     if os.path.exists(job_path):
@@ -49,12 +60,29 @@ def delete_job_by_id(job_id: str, jobs: dict) -> bool:
         json.dump(jobs, f, indent=2)
     return True
 
-
 def get_job_log_path(job_id: str):
     return os.path.join(settings.JOBS_DIR, job_id, "logs", f"{job_id}.log")
 
-def get_available_hosts():
-    return settings.AVAILABLE_HOSTS
+def is_valid_host(name: str) -> bool:
+    return name in settings.AVAILABLE_HOSTS
 
-def is_valid_host(target_host: str) -> bool:
-    return any(h["host"] == target_host for h in settings.AVAILABLE_HOSTS)
+# -------- queue helpers (filesystem) --------
+def enqueue_job_for_agent(worker_id: str, payload: dict):
+    wdir = os.path.join(settings.QUEUE_DIR, worker_id)
+    os.makedirs(wdir, exist_ok=True)
+    path = os.path.join(wdir, f"{payload['job_id']}.json")
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+
+def agent_pop_next_job(worker_id: str) -> dict | None:
+    wdir = os.path.join(settings.QUEUE_DIR, worker_id)
+    if not os.path.isdir(wdir):
+        return None
+    files = sorted([f for f in os.listdir(wdir) if f.endswith(".json")])
+    if not files:
+        return None
+    path = os.path.join(wdir, files[0])
+    with open(path) as f:
+        payload = json.load(f)
+    os.remove(path)
+    return payload

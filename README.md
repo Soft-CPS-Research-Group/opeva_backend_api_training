@@ -1,147 +1,78 @@
-# 🚀 OPEVA Backend API Training
+# 🚀 OPEVA Backend API Training (Multi-Host with NFS & Worker Agents)
 
-This repository contains the backend API service for managing the execution of simulations and algorithms in the OPEVA infrastructure.
+This repository contains the backend API service for managing the execution of **MARL simulations** and **energy flexibility scheduling** jobs in the **OPEVA infrastructure**.
 
-The service provides a REST API to:
-- Launch simulation jobs dynamically inside Docker containers
-- Track job status
-- Stream and persist container logs
-- Track progress and collect results
-- Stop running jobs if needed
-- Maintain persistent tracking of jobs even after restarts
-- Manage and delete configs or datasets
-- ✨ Stream training log files from simulation container (not just stdout)
-- Retrieve data from MongoDB collections (Living Lab and iCharging Headquarters)
-- Create datasets from MongoDB data with per-building and per-EV CSVs
-
-The backend is fully integrated with:
-- **OPEVA shared data storage** (`/opt/opeva_shared_data/`)
-- **OPEVA Docker network** (`opeva_network`)
-- **MLflow tracking server** (automatic metrics reporting)
-- **Watchtower** for automatic CI/CD updates
+The system supports **multi-host execution** using **Worker Agents** connected to the main server via **NFS shared storage** and optional **reverse SSH tunnels** for Docker remote control.
 
 ---
 
-## 📦 Project Structure
+## 📜 Table of Contents
+
+- Architecture Overview
+- Job Lifecycle & States
+- API Overview
+- 1️⃣ Server Setup (Main Server)
+- 2️⃣ Worker Setup (Slave Host)
+- 3️⃣ Launching a Job
+- 4️⃣ Monitoring & Stopping Jobs
+- 5️⃣ Best Practices
+
+---
+
+## Architecture Overview
 
 ```
-opeva_backend_api_training/
-app/
-├── api/                        # Routes (API layer)
-│   ├── endpoints/
-│   │   ├── jobs.py
-│   │   ├── configs.py
-│   │   ├── datasets.py
-│   │   ├── mongo.py
-│   │   └── health.py
-│   └── router.py               # Main APIRouter() mounting subroutes
-├── controllers/               # Controllers - HTTP-facing logic
-│   ├── job_controller.py
-│   ├── config_controller.py
-│   ├── dataset_controller.py
-│   └── mongo_controller.py
-├── services/                  # Business logic
-│   ├── job_service.py
-│   ├── config_service.py
-│   ├── dataset_service.py
-│   └── mongo_service.py
-├── models/                    # Pydantic models and domain entities
-│   └── job.py
-├── utils/                     # Low-level utilities
-│   ├── docker_manager.py
-│   ├── job_utils.py
-│   ├── file_utils.py
-│   └── mongo_utils.py
-├── config.py
-├── main.py                    # Just mounts router
-├── Dockerfile                # Containerization
-├── requirements.txt          # Dependencies
-├── .github/workflows/        # GitHub Actions CI/CD
-│   └── docker-publish.yml
-├── README.md                 # This file
++-------------------+
+|   MAIN SERVER     |
+| (Backend API)     |
++-------------------+
+        |
+        | REST API
+        v
++-------------------+
+|   JOB QUEUE       |
++-------------------+
+        |
+        | Assign jobs to available worker
+        v
++-------------------+       +-------------------+
+| WORKER AGENT 1    |  ...  | WORKER AGENT N    |
+| (Docker + NFS)    |       | (Docker + NFS)    |
++-------------------+       +-------------------+
+        |
+        | Runs container with simulator + algorithm
+        v
++-------------------+
+|  Shared Storage   |
+| (/opt/opeva_shared_data) |
++-------------------+
+        |
+        | Results, logs, progress back to server
+        v
++-------------------+
+|  Backend stores   |
+|  and serves data  |
++-------------------+
 ```
 
 ---
 
-## 🧹 Infrastructure Integration
+## Job Lifecycle & States
 
-This service is part of the **OPEVA Infra Services** stack and communicates with:
-- MLflow: `http://mlflow:5000`
-- Simulation services: dynamically launched containers
-- Shared storage: `/opt/opeva_shared_data/`
-- MongoDB databases: `living_lab` and `i-charging_headquarters`
+Jobs move through the following states:
 
-The service attaches to the external Docker network:
-```
-networks:
-  opeva_network:
-    external: true
-```
+| State        | Meaning |
+|--------------|---------|
+| `queued`     | Waiting to be assigned to a worker |
+| `running`    | Worker has started the job |
+| `finished`   | Job completed successfully |
+| `failed`     | Job ended with an error |
+| `stopped`    | Job was manually stopped |
+| `timeout`    | Job exceeded max runtime |
 
-It uses the shared `/opt/opeva_shared_data/` folder to store:
+**Stop Eligibility:** Only `queued` or `running` jobs can be stopped.
 
-- All outputs (logs, results, progress, metadata) are stored under `/jobs/{job_id}/`, including:
-  - `logs/{job_id}.log`
-  - `results/result.json`
-  - `progress/progress.json`
-  - `job_info.json`
-
-## 🧠 Distributed Execution with Ray
-
-The API launches simulation containers through [Ray](https://www.ray.io/) remote tasks.
-To use this functionality you need a running Ray cluster. The backend
-automatically attempts to connect to a Ray head node at `ray://ray-head:10001`,
-which assumes a Ray container named **`ray-head`** is running on the same Docker
-network.
-
-1. **Start a Ray head container** (name it `ray-head` so the backend can find it):
-   ```bash
-   docker run --rm --name ray-head \
-     -p 6379:6379 -p 8265:8265 -p 10001:10001 \
-     --network opeva_network \
-     rayproject/ray:latest ray start --head --dashboard-host=0.0.0.0
-   ```
-2. **Run the backend container**. It will connect to `ray-head` automatically:
-   ```bash
-   docker run -p 8000:8000 --network opeva_network \
-     -v /opt/opeva_shared_data:/data opeva_backend_api_training
-   ```
-   To use a different Ray head, override the address:
-   ```bash
-   docker run -p 8000:8000 --network opeva_network \
-     -e RAY_ADDRESS="ray://<head-host>:10001" \
-     -v /opt/opeva_shared_data:/data opeva_backend_api_training
-   ```
-3. **Join additional worker machines** so they can run simulations:
-   ```bash
-   ray start --address='<head-ip>:6379'
-   ```
-
-The backend calls `ray.init(address=<configured>)` during startup. Simulation
-results and logs remain written under `/opt/opeva_shared_data/jobs/{job_id}/`
-just like before.
-
-## Getting Started
-### Requirements
-- Docker
-- Docker Compose
-- Docker network: `opeva_network` (external, global)
-- Shared data folder: `/opt/opeva_shared_data/`
-
-**Build and run locally**
-```bash
-docker build -t opeva_backend_api_training .
-docker run -p 8000:8000 --network opeva_network -v /opt/opeva_shared_data:/data opeva_backend_api_training
-```
-
-**Using Docker Compose**
-```bash
-cd /opt/opeva_infra_services/opeva_backend_api
-docker-compose up -d
-```
-This will start:
-- The backend API on port 8000
-- Watchtower for automatic deployment updates
+---
 
 ## API Overview
 
@@ -176,23 +107,20 @@ This will start:
 | GET    | /schema/{site}                          | Retrieve the schema for a specific site.                                 |
 ---
 
-## CI/CD Pipeline
+## 1️⃣ Server Setup (Main Server)
 
-This repository uses GitHub Actions to build and publish Docker images to GitHub Container Registry:
+### Install NFS Server
 ```
-.github/workflows/docker-publish.yml
+sudo apt update
+sudo apt install nfs-kernel-server
 ```
-On every push to `main`:
-- Docker image is built and pushed to `ghcr.io/tiagofonseca/opeva_backend_api_training:latest`
-- Watchtower running in the VM will automatically detect updates and redeploy the service
 
-**Polling interval for Watchtower**: every 24 hours (`WATCHTOWER_POLL_INTERVAL=86400`)
+### Create Shared Folder
+```
+sudo mkdir -p /opt/opeva_shared_data
+sudo chown $USER:$USER /opt/opeva_shared_data
+```
 
-## Persistent Job Tracking
-Job container IDs are saved across reboots:
-```
-/opt/opeva_shared_data/job_track.json
-```
 
 ## Logs and Results
 Simulation outputs are persisted under `/opt/opeva_shared_data/jobs/{job_id}/`:
@@ -226,138 +154,96 @@ latest values.
 ❌ Do **not** rely on container stdout logs — use the generated `.log` files
 
 ---
-
-## 📁 Output Paths (in /opt/opeva_shared_data)
+### Export via NFS
+Edit `/etc/exports`:
 ```
-jobs/{job_id}/
-├── logs/
-│   └── {job_id}.log
-├── progress/
-│   └── progress.json
-├── results/
-│   └── result.json
-├── job_info.json
+/opt/opeva_shared_data *(rw,sync,no_subtree_check)
+```
+
+
+Apply changes:
+```
+sudo exportfs -ra
+```
+
+**Open NFS ports** in VPN/internal network:
+2049 (nfs), 111 (rpcbind), 20048 (mountd), 4045 (lockd), 32765-32768 (statd)
+
+---
+
+## 2️⃣ Worker Setup (Slave Host)
+
+### Install Requirements
+```
+sudo apt update
+sudo apt install docker.io nfs-common
+```
+
+### Mount Shared Folder
+```
+sudo mkdir -p /opt/opeva_shared_data
+sudo mount -t nfs SERVER_IP:/opt/opeva_shared_data /opt/opeva_shared_data
+```
+> To auto-mount, add to `/etc/fstab`.
+
+### Install Worker Agent
+Save `agent.py` to `/opt/opeva_worker/agent.py`, make executable:
+```
+chmod +x /opt/opeva_worker/agent.py
+```
+
+### Create systemd Service
+File: `/etc/systemd/system/opeva-worker.service`
+```
+[Unit]
+Description=OPEVA Worker Agent
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/opeva_worker/agent.py
+Restart=always
+Environment=OPEVA_SERVER=http://MAIN-SERVER:8000
+Environment=WORKER_ID=%H
+Environment=POLL_INTERVAL=5
+WorkingDirectory=/opt/opeva_worker
+
+[Install]
+WantedBy=multi-user.target
+```
+Enable & start:
+```
+sudo systemctl enable opeva-worker
+sudo systemctl start opeva-worker
 ```
 
 ---
 
-## 📰 Full API Usage Examples
-
-### ✅ Launch a Simulation (existing config)
-```bash
-curl -X POST http://<IP>:8000/run-simulation \
-  -H "Content-Type: application/json" \
-  -d '{
-    "config_path": "configs/my_config.yaml",
-    "target_host": "local"
-}'
+### Optional: Reverse SSH Tunnel for Remote Docker
+On **worker**:
 ```
-
-### ✅ Launch a Simulation (inline config)
-```bash
-curl -X POST http://<IP>:8000/run-simulation \
-  -H "Content-Type: application/json" \
-  -d '{
-    "config": { ... },
-    "save_as": "generated_config.yaml",
-    "target_host": "local"
-}'
+ssh -N -R 23750:/var/run/docker.sock softcps
 ```
-
-### 🔍 Check Job Status
-```bash
-curl http://<IP>:8000/status/{job_id}
+On **server**:
 ```
-
-### 📊 Get Simulation Results
-```bash
-curl http://<IP>:8000/result/{job_id}
-```
-
-### 📈 Get Training Progress
-```bash
-curl http://<IP>:8000/progress/{job_id}
-```
-
-### 📄 Stream Logs (stdout)
-```bash
-curl http://<IP>:8000/logs/{job_id}
-```
-
-### 🟞️ Stream Training Log File (.log)
-```bash
-curl http://<IP>:8000/logs/file/{job_id}
-```
-
-### ❌ Stop Running Job
-```bash
-curl -X POST http://<IP>:8000/stop/{job_id}
-```
-
-### 📃 List Jobs
-```bash
-curl http://<IP>:8000/jobs
-```
-
-### 📰 Job Metadata
-```bash
-curl http://<IP>:8000/job-info/{job_id}
-```
-
-### Available Hosts
-```bash
-curl http://<IP>:8000/hosts
-```
-
-### ❤️ Health Check
-```bash
-curl http://<IP>:8000/health
+docker -H tcp://127.0.0.1:23750 info
 ```
 
 ---
 
-## 🔧 Configs & Datasets Management
+## 3️⃣ Launching a Job
 
-### ✅ Create Config
-```bash
-curl -X POST http://<IP>:8000/config/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "file_name": "custom.yaml",
-    "config": { ...config... }
-}'
+**Local (Server)**
+```
+curl -X POST http://SERVER:8000/run-simulation   -H "Content-Type: application/json"   -d '{"config_path":"configs/my_config.yaml","target_host":"local"}'
 ```
 
-### 📜 List Configs
-```bash
-curl http://<IP>:8000/configs
+**Remote (Worker)**
+```
+curl -X POST http://SERVER:8000/run-simulation   -H "Content-Type: application/json"   -d '{"config_path":"configs/my_config.yaml","target_host":"worker_name"}'
 ```
 
-### 🔍 View Config File
-```bash
-curl http://<IP>:8000/config/custom.yaml
-```
+---
 
-### ❌ Delete Config File
-```bash
-curl -X DELETE http://<IP>:8000/config/custom.yaml
-```
-
-### ✅ Create Dataset (from MongoDB site)
-```bash
-curl -X POST http://<IP>:8000/dataset \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "dataset1",
-    "site_id": "living_lab",
-    "config": {
-      "parameter1": "value1",
-      "parameter2": 42
-    },
-    "from_ts": "2023-01-01 00:00:00",
-    "until_ts": "2023-01-01 00:00:00"
-}'
-```
 
 ### 📃 List Datasets
 List dataset names along with size and creation time.
@@ -373,29 +259,27 @@ curl -L http://<IP>:8000/dataset/download/dataset1 -o dataset1.zip
 ### ❌ Delete Dataset
 ```bash
 curl -X DELETE http://<IP>:8000/dataset/dataset1
+
+## 4️⃣ Monitoring & Stopping Jobs
+
+
 ```
-
-### ❌ Delete Job (and its folder)
-```bash
-curl -X DELETE http://<IP>:8000/job/{job_id}
-```
-
-## 📰 MongoDB Endpoints Usage Examples
-
-### ✅ List all available MongoDB sites (databases)
-```bash
-curl http://<IP>:8000/sites
-```
-
-### ✅ Retrieve all real-time data from a specific site (e.g., iCharging Headquarters)
-```bash
-curl http://<IP>:8000/real-time-data/i-charging_headquarters
-```
-
-### ✅ Retrieve only the last 60 minutes of data from a specific site
-```bash
-curl "http://<IP>:8000/real-time-data/living_lab?minutes=60"
+curl http://SERVER:8000/status/{job_id}
+curl http://SERVER:8000/progress/{job_id}
+curl http://SERVER:8000/logs/{job_id}
+curl -X POST http://SERVER:8000/stop/{job_id}
 ```
 
 ---
 
+## 5️⃣ Best Practices
+
+- ✅ Always mount `/opt/opeva_shared_data` on **both server and workers**
+- ✅ Always name hosts in `config.py` so API can target them
+- ✅ Worker should **pull images locally** before running jobs
+- ✅ GPU support: install NVIDIA drivers + `nvidia-docker2` on workers
+- ❌ Do not store configs with relative paths
+
+---
+
+© 2025 OPEVA Infrastructure – Multi-Host Training Ready

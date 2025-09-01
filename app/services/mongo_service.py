@@ -2,6 +2,7 @@ from app.utils.mongo_utils import get_db, list_databases
 from fastapi.encoders import jsonable_encoder
 from bson import ObjectId
 from datetime import datetime, timedelta
+from typing import Optional
 
 def serialize_mongo_docs(docs):
     return jsonable_encoder(docs, custom_encoder={ObjectId: str, datetime: str})
@@ -10,7 +11,7 @@ def get_all_sites():
     dbs = list_databases()
     return [db for db in dbs if db not in ("admin", "local", "config")]
 
-def get_all_collections(site_name: str, minutes: int | None = None):
+def get_all_collections(site_name: str, minutes: Optional[int] = None):
     db = get_db(site_name)
     collections = db.list_collection_names()
     result = {}

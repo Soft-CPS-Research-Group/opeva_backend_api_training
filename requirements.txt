@@ -9,4 +9,3 @@ python-dotenv
 pyyaml
 numpy
 pandas
-ray[rllib]

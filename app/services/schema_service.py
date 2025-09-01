@@ -1,4 +1,5 @@
 from app.utils.mongo_utils import get_client, get_db
+from typing import Optional
 
 def create_schema(site: str, schema: dict):
     client = get_client()
@@ -23,7 +24,7 @@ def update_schema(site: str, schema: dict):
         upsert=True
     )
 
-def get_schema(site: str) -> dict | None:
+def get_schema(site: str) -> Optional[dict] :
     db = get_db(site)
     doc = db["schema"].find_one({"_id": "schema"})
     return doc.get("schema") if doc else None
