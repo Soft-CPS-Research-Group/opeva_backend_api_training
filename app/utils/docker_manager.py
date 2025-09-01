@@ -1,5 +1,6 @@
 import docker
 import os
+import time
 from app.config import settings
 from app.models.job import SimulationRequest
 from app.utils.job_utils import load_jobs, get_job_log_path, is_valid_host
@@ -31,9 +32,12 @@ def run_simulation(job_id, request: SimulationRequest, target_host):
 
 def get_container_status(container_id):
     try:
-        return docker.from_env().containers.get(container_id).status
-    except:
-        return "not_found"
+        container = docker.from_env().containers.get(container_id)
+        status = container.status
+        exit_code = container.attrs.get("State", {}).get("ExitCode")
+        return status, exit_code
+    except Exception:
+        return "not_found", None
 
 def stop_container(container_id):
     try:
@@ -48,7 +52,15 @@ def stream_container_logs(container_id):
             log_file = get_job_log_path(job_id)
             if os.path.exists(log_file):
                 with open(log_file) as f:
-                    for line in f:
-                        yield line
+                    while True:
+                        line = f.readline()
+                        if line:
+                            yield line
+                        else:
+                            status, _ = get_container_status(container_id)
+                            if status == "running":
+                                time.sleep(0.5)
+                                continue
+                            break
                 return
     yield f"Log not found for container ID: {container_id}"

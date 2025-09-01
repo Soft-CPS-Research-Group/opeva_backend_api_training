@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException
+from fastapi.responses import FileResponse
 from app.controllers import dataset_controller
 from typing import Optional
+import os
 
 router = APIRouter()
 
@@ -22,6 +24,17 @@ async def list_dates_available_per_collection(site_id : str):
 async def list_datasets():
     return dataset_controller.list_datasets()
 
+@router.get("/dataset/download/{name}")
+async def download_dataset(name: str):
+    try:
+        file_path = dataset_controller.download_dataset(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return FileResponse(file_path, filename=os.path.basename(file_path))
+
 @router.delete("/dataset/{name}")
 async def delete_dataset(name: str):
-    return dataset_controller.delete_dataset(name)
+    try:
+        return dataset_controller.delete_dataset(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Dataset not found")

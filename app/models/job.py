@@ -1,3 +1,4 @@
+from enum import Enum
 from pydantic import BaseModel
 from typing import Optional, Dict
 
@@ -10,3 +11,13 @@ class JobLaunchRequest(BaseModel):
 class SimulationRequest(BaseModel):
     config_path: str
     job_name: Optional[str] = None
+
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    DISPATCHED = "dispatched"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    STOPPED = "stopped"
+

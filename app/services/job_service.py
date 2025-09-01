@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from uuid import uuid4
 
 import ray
@@ -8,7 +9,7 @@ import yaml
 from fastapi import HTTPException
 
 from app.config import settings
-from app.models.job import JobLaunchRequest, SimulationRequest
+from app.models.job import JobLaunchRequest, SimulationRequest, JobStatus
 from app.utils import docker_manager, file_utils, job_utils
 
 ray_address = settings.RAY_ADDRESS
@@ -46,20 +47,31 @@ async def launch_simulation(request: JobLaunchRequest):
         config_path = f"configs/{config_path}"
 
     sim_request = SimulationRequest(config_path=config_path, job_name=job_name)
-    task = run_simulation_task.remote(job_id, sim_request.dict(), request.target_host)
-    result = ray.get(task)
-
     job_metadata = {
-        "container_id": result["container_id"],
-        "container_name": result["container_name"],
         "job_name": job_name,
         "config_path": config_path,
         "target_host": request.target_host,
         "experiment_name": experiment_name,
         "run_name": run_name,
-        "ray_task_id": task.hex(),
+        "status": JobStatus.PENDING.value,
     }
 
+    job_utils.save_job(job_id, job_metadata)
+    jobs[job_id] = job_metadata
+
+    task = run_simulation_task.remote(job_id, sim_request.dict(), request.target_host)
+    result = ray.get(task)
+
+    status = JobStatus.DISPATCHED.value
+    if request.target_host == "local":
+        status = JobStatus.RUNNING.value
+
+    job_metadata.update({
+        "container_id": result["container_id"],
+        "container_name": result["container_name"],
+        "ray_task_id": task.hex(),
+        "status": status,
+    })
     job_utils.save_job(job_id, job_metadata)
     job_utils.save_job_info(
         job_id,
@@ -77,7 +89,7 @@ async def launch_simulation(request: JobLaunchRequest):
     return {
         "job_id": job_id,
         "container_id": result["container_id"],
-        "status": "launched",
+        "status": status,
         "host": request.target_host,
         "job_name": job_name,
         "ray_task_id": task.hex(),
@@ -87,7 +99,25 @@ def get_status(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return {"job_id": job_id, "status": docker_manager.get_container_status(job["container_id"]) }
+    container_status, exit_code = docker_manager.get_container_status(job["container_id"])
+    if container_status == "running":
+        status = JobStatus.RUNNING.value
+    elif container_status == "exited":
+        status = JobStatus.COMPLETED.value if exit_code == 0 else JobStatus.FAILED.value
+    elif container_status in ("created", "restarting"):
+        if job.get("target_host") == "local":
+            status = JobStatus.RUNNING.value
+        else:
+            status = JobStatus.DISPATCHED.value
+    elif container_status == "stopped":
+        status = JobStatus.STOPPED.value
+    elif container_status == "not_found":
+        status = job.get("status", JobStatus.FAILED.value)
+    else:
+        status = JobStatus.FAILED.value
+    job["status"] = status
+    job_utils.save_job(job_id, job)
+    return {"job_id": job_id, "status": status}
 
 def get_result(job_id: str):
     return file_utils.collect_results(job_id)
@@ -105,17 +135,21 @@ def stop_job(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return {"message": docker_manager.stop_container(job["container_id"])}
+    message = docker_manager.stop_container(job["container_id"])
+    job["status"] = JobStatus.STOPPED.value
+    job_utils.save_job(job_id, job)
+    return {"message": message, "status": job["status"]}
 
 def list_jobs():
     result = []
-    for job_id, job in jobs.items():
+    for job_id in list(jobs.keys()):
+        status_resp = get_status(job_id)
         info_path = os.path.join("/opt/opeva_shared_data", "jobs", job_id, "job_info.json")
         info = {}
         if os.path.exists(info_path):
             with open(info_path) as f:
                 info = json.load(f)
-        result.append({"job_id": job_id, "status": docker_manager.get_container_status(job["container_id"]), "job_info": info})
+        result.append({"job_id": job_id, "status": status_resp["status"], "job_info": info})
     return result
 
 def get_job_info(job_id: str):
@@ -140,8 +174,16 @@ def get_file_logs(job_id: str):
             path = os.path.join(log_dir, filename)
             def read_log():
                 with open(path) as f:
-                    for line in f:
-                        yield line
+                    while True:
+                        line = f.readline()
+                        if line:
+                            yield line
+                        else:
+                            status_resp = get_status(job_id)["status"]
+                            if status_resp == JobStatus.RUNNING.value:
+                                time.sleep(0.5)
+                                continue
+                            break
             return read_log()
     raise HTTPException(status_code=404, detail="Log file not found in logs folder")
 
