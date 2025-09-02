@@ -63,14 +63,33 @@ Jobs move through the following states:
 
 | State        | Meaning |
 |--------------|---------|
+| `launching`  | Job metadata being prepared on the server |
 | `queued`     | Waiting to be assigned to a worker |
+| `dispatched` | Worker agent fetched the job but hasn't started it |
 | `running`    | Worker has started the job |
 | `finished`   | Job completed successfully |
 | `failed`     | Job ended with an error |
 | `stopped`    | Job was manually stopped |
-| `timeout`    | Job exceeded max runtime |
+| `canceled`   | Job was canceled before starting |
+| `not_found`  | Job or container information no longer available |
+| `unknown`    | State could not be determined |
+
+### State transitions
+
+- Local jobs: `launching` → `running` → `finished`/`failed`/`stopped`
+- Remote jobs: `launching` → `queued` → `dispatched` → `running` → `finished`/`failed`/`stopped`
+- A `queued` or `running` job may transition to `canceled` if stopped before completion
+
+Retrieve the current state with `GET /status/{job_id}`. Progress can be polled via `GET /progress/{job_id}`.
 
 **Stop Eligibility:** Only `queued` or `running` jobs can be stopped.
+
+### Sample job artifacts for testing
+
+The `examples/` directory contains ready‑made job folders representing common
+states (finished, running, failed, queued). Copy one of these folders into your
+server's jobs directory to exercise the status, result, progress, and log
+endpoints without launching real jobs.
 
 ---
 
@@ -86,7 +105,7 @@ Jobs move through the following states:
 | GET    | /result/{job_id}                        | Get final results of job                                                   |
 | GET    | /progress/{job_id}                      | Get progress updates                                                       |
 | GET    | /logs/{job_id}                          | Stream container logs                                                      |
-| GET    | /logs/file/{job_id}                     | Stream simulation log file (.log)                                          |
+| GET    | /file-logs/{job_id}                     | Stream simulation log file (.log)                                          |
 | POST   | /stop/{job_id}                          | Stop a running container/job                                               |
 | GET    | /jobs                                   | List all tracked jobs                                                      |
 | GET    | /job-info/{job_id}                      | Get metadata about a job                                                   |
@@ -128,21 +147,6 @@ Simulation outputs are persisted under `/opt/opeva_shared_data/jobs/{job_id}/`:
 - Results: `results/result.json`
 - Progress: `progress/progress.json`
 - Metadata: `job_info.json`
-
-## Job States
-Jobs transition through these states:
-- `pending` – request recorded before the container starts
-- `dispatched` – job handed off to a remote host and awaiting start
-- `running` – simulation executing inside the container (local jobs skip `dispatched`)
-- `completed` – container exited successfully
-- `failed` – container exited with an error code
-- `stopped` – job manually terminated via the API
-
-Retrieve the current state with `GET /status/{job_id}`. Progress updates remain
-on disk so clients can poll `GET /progress/{job_id}` whenever they need the
-latest values.
-
----
 
 ## 😓 Best Practices & Gotchas
 
@@ -266,7 +270,9 @@ curl -X DELETE http://<IP>:8000/dataset/dataset1
 ```
 curl http://SERVER:8000/status/{job_id}
 curl http://SERVER:8000/progress/{job_id}
+curl http://SERVER:8000/result/{job_id}
 curl http://SERVER:8000/logs/{job_id}
+curl http://SERVER:8000/file-logs/{job_id}
 curl -X POST http://SERVER:8000/stop/{job_id}
 ```
 

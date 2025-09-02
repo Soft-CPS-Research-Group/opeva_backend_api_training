@@ -1,3 +1,4 @@
+from __future__ import annotations
 from enum import Enum
 
 class JobStatus(str, Enum):
@@ -18,3 +19,29 @@ class JobStatus(str, Enum):
     NOT_FOUND = "not_found"      # container/file missing
     UNKNOWN = "unknown"          # fallback
     CANCELED = "canceled"        # (optional) queued/dispatched canceled before start
+
+
+# Allowed state transitions for jobs
+ALLOWED_TRANSITIONS = {
+    JobStatus.LAUNCHING: {JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.CANCELED},
+    JobStatus.QUEUED: {JobStatus.DISPATCHED, JobStatus.CANCELED},
+    JobStatus.DISPATCHED: {JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELED},
+    JobStatus.RUNNING: {JobStatus.FINISHED, JobStatus.FAILED, JobStatus.STOPPED, JobStatus.CANCELED},
+    JobStatus.FINISHED: set(),
+    JobStatus.FAILED: set(),
+    JobStatus.STOPPED: set(),
+    JobStatus.CANCELED: set(),
+}
+
+
+def can_transition(current: str | "JobStatus", new: str | "JobStatus") -> bool:
+    """Check if a status change is permitted."""
+    try:
+        cur = JobStatus(current)
+        nxt = JobStatus(new)
+    except ValueError:
+        return False
+
+    if nxt in (JobStatus.NOT_FOUND, JobStatus.UNKNOWN):
+        return True
+    return nxt in ALLOWED_TRANSITIONS.get(cur, set())

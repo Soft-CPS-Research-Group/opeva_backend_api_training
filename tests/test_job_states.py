@@ -22,7 +22,7 @@ ray_stub = types.SimpleNamespace(
 sys.modules.setdefault("ray", ray_stub)
 
 from app.services import job_service
-from app.models.job import JobStatus
+from app.status import JobStatus, can_transition
 
 
 def test_get_status_local_created(monkeypatch):
@@ -41,3 +41,15 @@ def test_get_status_remote_created(monkeypatch):
     status = job_service.get_status('job2')
     assert status['status'] == JobStatus.DISPATCHED.value
     job_service.jobs.pop('job2', None)
+
+
+def test_status_transition_helpers():
+    assert can_transition(JobStatus.LAUNCHING, JobStatus.QUEUED)
+    assert not can_transition(JobStatus.QUEUED, JobStatus.RUNNING)
+
+
+def test_write_status_blocks_invalid(monkeypatch):
+    monkeypatch.setattr(job_service, '_read_status_file', lambda jid: JobStatus.QUEUED.value)
+    monkeypatch.setattr(job_service.job_utils, 'write_status_file', lambda *a, **k: None)
+    with pytest.raises(ValueError):
+        job_service._write_status('jobx', JobStatus.RUNNING.value)
