@@ -1,3 +1,7 @@
+import os
+
+from fastapi.responses import FileResponse
+
 from app.services import dataset_service
 
 def create_dataset(name: str, site_id: str, config: dict, period : int = 60, from_ts: str = None, until_ts: str = None):
@@ -14,4 +18,5 @@ def delete_dataset(name: str):
 
 
 def download_dataset(name: str):
-    return dataset_service.get_dataset_file(name)
+    file_path = dataset_service.get_dataset_file(name)
+    return FileResponse(file_path, filename=os.path.basename(file_path))
