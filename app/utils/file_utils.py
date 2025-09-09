@@ -73,7 +73,7 @@ def parse_timestamp(ts):
     raise TypeError(f"Unsupported timestamp type: {type(ts)}")
 
 
-def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, from_ts: str = None,
+def create_dataset_dir(name: str, site_id: str, config: dict, description: str = "", period: int = 60, from_ts: str = None,
                        until_ts: str = None):
     # Create the target dataset directory
     path = os.path.join(settings.DATASETS_DIR, name)
@@ -504,6 +504,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     # Combine the configuration with the structure and write to JSON
     schema = {
         **config,
+        "description": description,
         "structure": structure_doc
     }
 
@@ -569,9 +570,19 @@ def list_available_datasets():
         path = os.path.join(settings.DATASETS_DIR, name)
         if not os.path.exists(path):
             continue
-        size = _get_path_size(path)
-        created_at = datetime.fromtimestamp(os.path.getctime(path)).isoformat()
-        datasets.append({"name": name, "size": size, "created_at": created_at})
+
+        description = ""
+        schema_path = os.path.join(path, "schema.json")
+        try:
+            if os.path.isfile(schema_path):
+                with open(schema_path) as f:
+                    schema_data = json.load(f)
+                    description = schema_data.get("description", "")
+        except Exception:
+            # Be resilient if a dataset folder is malformed
+            description = ""
+
+        datasets.append({"name": name, "description": description})
     return datasets
 
 

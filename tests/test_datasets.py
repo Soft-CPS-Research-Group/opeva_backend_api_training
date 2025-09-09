@@ -15,7 +15,7 @@ def dataset_env(tmp_path, monkeypatch):
     importlib.reload(file_utils)
     return file_utils, config.settings
 
-def test_list_datasets_returns_metadata(dataset_env):
+def test_list_datasets_returns_description(dataset_env):
     file_utils, settings = dataset_env
     datasets_dir = settings.DATASETS_DIR
     os.makedirs(datasets_dir, exist_ok=True)
@@ -34,8 +34,7 @@ def test_list_datasets_returns_metadata(dataset_env):
     assert "dir_ds" in names
     assert "file_ds.csv" in names
     dir_meta = next(d for d in datasets if d["name"] == "dir_ds")
-    assert dir_meta["size"] > 0
-    assert "created_at" in dir_meta
+    assert "description" in dir_meta
 
 def test_delete_dataset_by_name(dataset_env):
     file_utils, settings = dataset_env
