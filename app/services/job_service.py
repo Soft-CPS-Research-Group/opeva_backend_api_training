@@ -12,6 +12,12 @@ from app.status import JobStatus, can_transition
 # In-memory cache of tracked jobs for fast access and testability
 jobs = job_utils.load_jobs()
 
+
+def _persist_job(job_id: str, metadata: dict):
+    """Persist job metadata to disk and mirror it in the in-memory cache."""
+    job_utils.save_job(job_id, metadata)
+    jobs[job_id] = metadata
+
 # ---------- helpers ----------
 def _slug(s: str) -> str:
     return re.sub(r'[^a-zA-Z0-9_.-]', '_', s)
@@ -92,7 +98,7 @@ async def launch_simulation(request: JobLaunchRequest):
         "run_name": run_name,
         "status": JobStatus.LAUNCHING.value,
     }
-    job_utils.save_job(job_id, meta)
+    _persist_job(job_id, meta)
     job_utils.save_job_info(job_id, job_name, config_path, request.target_host,
                             container_id="", container_name="", exp=experiment_name, run=run_name)
     _write_status(job_id, JobStatus.LAUNCHING.value)
@@ -101,7 +107,7 @@ async def launch_simulation(request: JobLaunchRequest):
         sim_req = SimulationRequest(config_path=config_path, job_name=job_name)
         container = docker_manager.run_simulation(job_id, sim_req, settings.VM_SHARED_DATA)
         meta.update({"container_id": container.id, "container_name": container.name, "status": JobStatus.RUNNING.value})
-        job_utils.save_job(job_id, meta)
+        _persist_job(job_id, meta)
         job_utils.save_job_info(job_id, job_name, config_path, "local",
                                 container.id, container.name, experiment_name, run_name)
         _write_status(job_id, JobStatus.RUNNING.value)
@@ -130,7 +136,7 @@ async def launch_simulation(request: JobLaunchRequest):
     worker_id = request.target_host
     job_utils.enqueue_job_for_agent(worker_id, payload)
     meta.update({"status": JobStatus.QUEUED.value})
-    job_utils.save_job(job_id, meta)
+    _persist_job(job_id, meta)
     _write_status(job_id, JobStatus.QUEUED.value, {"worker_id": worker_id})
     return {"job_id": job_id, "status": JobStatus.QUEUED.value, "host": worker_id, "job_name": job_name}
 
@@ -284,13 +290,21 @@ def agent_update_status(job_id: str, status: str, extra: dict | None = None):
         with open(info_path, "w") as f:
             json.dump(info, f, indent=2)
 
-        jobs = job_utils.load_jobs()
-        if job_id in jobs:
+        tracked = job_utils.load_jobs()
+        if job_id in tracked:
+            updated = tracked[job_id]
             if "container_id" in extra:
-                jobs[job_id]["container_id"] = extra["container_id"]
+                updated["container_id"] = extra["container_id"]
             if "container_name" in extra:
-                jobs[job_id]["container_name"] = extra["container_name"]
-            with open(settings.JOB_TRACK_FILE, "w") as f:
-                json.dump(jobs, f, indent=2)
+                updated["container_name"] = extra["container_name"]
+            _persist_job(job_id, updated)
+        elif job_id in jobs:
+            # fall back to the in-memory version if the track file is missing
+            meta = jobs[job_id]
+            if "container_id" in extra:
+                meta["container_id"] = extra["container_id"]
+            if "container_name" in extra:
+                meta["container_name"] = extra["container_name"]
+            _persist_job(job_id, meta)
 
     return {"ok": True}
