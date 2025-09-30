@@ -50,9 +50,18 @@ Backend service that orchestrates MARL simulations and energy flexibility schedu
                                | Docker + NFS     |
                                +-------------------+
 ```
-- Jobs submitted to `/run-simulation` are either run locally (server Docker) or enqueued for a worker.
-- Worker agents poll `/api/agent/next-job`, execute Docker containers with the shared volume mounted as `/data`, stream logs to the shared directory, and report status updates.
-- The API serves artefacts directly from shared storage, so both local and remote runs follow the same layout.
+- Jobs submitted to `/run-simulation` are written to a global queue; each payload may specify a preferred host or allow any agent to execute it.
+- Worker agents poll `/api/agent/next-job`, execute Docker containers with the shared volume mounted as `/data`, stream logs to the shared directory, and post status/heartbeat updates.
+- The API serves artefacts directly from shared storage, so both local and remote runs follow the same layout and queue state.
+
+## Domain Model
+- **Job** — Core unit of work representing a simulation. Metadata lives in memory, `job_track.json`, and the per-job folder (`status.json`, `job_info.json`, logs, progress, results) while status transitions follow the `JobStatus` state machine. Jobs are always queued with an optional host preference; agents decide when to pick them up and may impose their own concurrency policies.
+- **Worker Agent** — Remote process that polls the global queue, decides locally when to start work, runs Docker workloads with the shared volume mounted at `/data`, streams logs, reports status transitions (`running`, `finished`, `failed`), and periodically sends heartbeats so the API can track availability.
+- See `docs/worker_agent.md` for the detailed contract expected from worker implementations.
+- **Config** — Experiment definitions stored under `configs/`. Jobs may reference an existing file or an inline payload that is persisted before launch, ensuring reproducibility.
+- **Dataset** — Aggregated CSV outputs stored beneath `datasets/` alongside a `schema.json`. Creation pulls from Mongo collections, list/delete/download endpoints expose the artefacts.
+- **Mongo Schema** — Canonical `schema` document per site database that describes available installations. CRUD endpoints allow seeding and updates before dataset generation.
+- **Shared Storage** — The mounted NFS root (`/opt/opeva_shared_data` by default) that contains configs, datasets, job artefacts, queues, and the job registry, acting as the coordination layer between API node and worker agents.
 
 ---
 
@@ -70,7 +79,7 @@ Default root: `/opt/opeva_shared_data` (configurable through `settings.VM_SHARED
 │       ├── logs/<job_id>.log
 │       ├── progress/progress.json
 │       └── results/result.json
-├── queue/<worker_id>/  # One JSON payload per queued job
+├── queue/              # One JSON payload per queued job (global queue)
 └── job_track.json      # Registry of known jobs (persisted cache)
 ```
 
@@ -436,6 +445,7 @@ All runtime settings live in `app/config.py` (`Settings` class). Key attributes:
 | `QUEUE_DIR` | `${VM_SHARED_DATA}/queue` | Agent job queue. |
 | `JOB_TRACK_FILE` | `${VM_SHARED_DATA}/job_track.json` | Persistent job registry. |
 | `AVAILABLE_HOSTS` | `["local", "gpu-server-1", "gpu-server-2", "tiago-laptop"]` | Valid `target_host` values. |
+| `HOST_HEARTBEAT_TTL` | `60` | Seconds before a host is considered offline if no heartbeat is received. |
 | `MONGO_*` | `runtimeUI` / `runtimeUIDB` / host `193.136.62.78` | Mongo connection details. |
 | `ACCEPTABLE_GAP_IN_MINUTES` | `60` | Controls interpolation in dataset exports. |
 

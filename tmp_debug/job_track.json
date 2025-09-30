@@ -1,0 +1,12 @@
+{
+  "12c4d70b-15ac-4864-b195-4bf2f023871e": {
+    "job_id": "12c4d70b-15ac-4864-b195-4bf2f023871e",
+    "job_name": "Pref-One",
+    "config_path": "configs/12c4d70b-15ac-4864-b195-4bf2f023871e.yaml",
+    "target_host": "worker-a",
+    "experiment_name": "Pref",
+    "run_name": "One",
+    "status": "queued",
+    "preferred_host": "worker-a"
+  }
+}

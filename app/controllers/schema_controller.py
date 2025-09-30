@@ -23,6 +23,8 @@ def get_schema_controller(site: str):
         if schema is None:
             raise HTTPException(status_code=404, detail="Schema not found.")
         return schema
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error fetching schema for site {site}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -9,21 +9,53 @@ WORKER_ID = os.environ.get("WORKER_ID", os.uname().nodename)
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "5"))
 SHARED = os.environ.get("OPEVA_SHARED_DIR", "/opt/opeva_shared_data")
 DEFAULT_NETWORK = os.environ.get("OPEVA_DOCKER_NETWORK", "opeva_network")
+HEARTBEAT_INTERVAL = int(os.environ.get("OPEVA_HEARTBEAT_INTERVAL", "30"))
 
 stop_flag = False
-def _sig(*_): 
-    global stop_flag; stop_flag = True
+
+
+def _sig(*_):
+    global stop_flag
+    stop_flag = True
+
+
 signal.signal(signal.SIGTERM, _sig)
 signal.signal(signal.SIGINT, _sig)
 
-client = docker.DockerClient(base_url="unix://var/run/docker.sock")
+_client = None
+_last_heartbeat = 0.0
+
+
+def get_docker_client():
+    global _client
+    if _client is None:
+        _client = docker.DockerClient(base_url="unix://var/run/docker.sock")
+    return _client
+
+
+def send_heartbeat(force: bool = False):
+    global _last_heartbeat
+    if HEARTBEAT_INTERVAL <= 0:
+        return
+    now = time.time()
+    if not force and (now - _last_heartbeat) < HEARTBEAT_INTERVAL:
+        return
+    try:
+        requests.post(
+            f"{SERVER}/api/agent/heartbeat",
+            json={"worker_id": WORKER_ID},
+            timeout=5,
+        )
+        _last_heartbeat = now
+    except Exception:
+        pass
 
 def _log_path(job_id): 
     return f"{SHARED}/jobs/{job_id}/logs/{job_id}.log"
 
 def _has_network(name: str) -> bool:
     try:
-        client.networks.get(name)
+        get_docker_client().networks.get(name)
         return True
     except Exception:
         return False
@@ -40,13 +72,13 @@ def run_job(job):
 
     image = job["image"]
     try:
-        client.images.pull(image)
+        get_docker_client().images.pull(image)
     except Exception:
         pass  # use local cache if pull fails
 
     # cleanup stale
     try:
-        client.containers.get(job["container_name"]).remove(force=True)
+        get_docker_client().containers.get(job["container_name"]).remove(force=True)
     except Exception:
         pass
 
@@ -60,7 +92,7 @@ def run_job(job):
     env.setdefault("NVIDIA_VISIBLE_DEVICES", "all")
     env.setdefault("NVIDIA_DRIVER_CAPABILITIES", "compute,utility")
 
-    container = client.containers.run(
+    container = get_docker_client().containers.run(
         image=image,
         name=job["container_name"],
         command=job["command"],
@@ -99,9 +131,11 @@ def run_job(job):
                       timeout=5)
     except Exception:
         pass
+    send_heartbeat(force=True)
 
 def main():
     while not stop_flag:
+        send_heartbeat()
         try:
             r = requests.post(f"{SERVER}/api/agent/next-job",
                               json={"worker_id": WORKER_ID}, timeout=10)
@@ -115,9 +149,7 @@ if __name__ == "__main__":
     main()
 
 
-
-# /etc/systemd/system/opeva-agent.service
-# /etc/systemd/system/opeva-agent.service
+SYSTEMD_UNIT_TEMPLATE = """# /etc/systemd/system/opeva-agent.service
 [Unit]
 Description=OPEVA Worker Agent
 After=network-online.target docker.service
@@ -139,3 +171,4 @@ TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
+"""

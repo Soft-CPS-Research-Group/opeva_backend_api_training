@@ -67,22 +67,62 @@ def is_valid_host(name: str) -> bool:
     return name in settings.AVAILABLE_HOSTS
 
 # -------- queue helpers (filesystem) --------
-def enqueue_job_for_agent(worker_id: str, payload: dict):
-    wdir = os.path.join(settings.QUEUE_DIR, worker_id)
-    os.makedirs(wdir, exist_ok=True)
-    path = os.path.join(wdir, f"{payload['job_id']}.json")
+def _queue_path(job_id: str) -> str:
+    return os.path.join(settings.QUEUE_DIR, f"{job_id}.json")
+
+
+def enqueue_job(payload: dict):
+    os.makedirs(settings.QUEUE_DIR, exist_ok=True)
+    path = _queue_path(payload["job_id"])
+    entry = {
+        "job_id": payload["job_id"],
+        "preferred_host": payload.get("preferred_host"),
+    }
     with open(path, "w") as f:
-        json.dump(payload, f, indent=2)
+        json.dump(entry, f, indent=2)
 
 def agent_pop_next_job(worker_id: str) -> dict | None:
-    wdir = os.path.join(settings.QUEUE_DIR, worker_id)
+    wdir = settings.QUEUE_DIR
     if not os.path.isdir(wdir):
         return None
-    files = sorted([f for f in os.listdir(wdir) if f.endswith(".json")])
-    if not files:
-        return None
-    path = os.path.join(wdir, files[0])
-    with open(path) as f:
-        payload = json.load(f)
-    os.remove(path)
-    return payload
+    files = sorted(
+        [os.path.join(wdir, f) for f in os.listdir(wdir) if f.endswith(".json")],
+        key=lambda p: os.path.getmtime(p)
+    )
+    for path in files:
+        claim_path = f"{path}.claim.{worker_id}"
+        try:
+            os.replace(path, claim_path)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+
+        try:
+            with open(claim_path) as f:
+                payload = json.load(f)
+            preferred = payload.get("preferred_host")
+            if preferred and preferred != worker_id:
+                os.replace(claim_path, path)
+                continue
+            os.remove(claim_path)
+            return payload
+        except Exception:
+            try:
+                if os.path.exists(claim_path):
+                    os.replace(claim_path, path)
+            except Exception:
+                pass
+            continue
+    return None
+
+
+def remove_from_queue(job_id: str) -> bool:
+    path = _queue_path(job_id)
+    if os.path.exists(path):
+        os.remove(path)
+        return True
+    return False
+
+
+enqueue_job_for_agent = enqueue_job
