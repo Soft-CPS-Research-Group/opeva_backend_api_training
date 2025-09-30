@@ -1,16 +1,24 @@
 # app/services/job_service.py
-import os, re, json, yaml
+import os, re, json, yaml, time
 from uuid import uuid4
 from typing import Generator, Optional
-from fastapi import HTTPException, Response
+from fastapi import HTTPException
 
 from app.config import settings
-from app.models.job import SimulationRequest, JobLaunchRequest
-from app.utils import docker_manager, job_utils, file_utils
+from app.models.job import JobLaunchRequest
+from app.utils import job_utils, file_utils
 from app.status import JobStatus, can_transition
 
 # In-memory cache of tracked jobs for fast access and testability
 jobs = job_utils.load_jobs()
+
+HEARTBEAT_TTL = int(os.environ.get("HOST_HEARTBEAT_TTL", "60"))
+host_heartbeats: dict[str, dict] = {}
+
+CAPACITY_COUNT_STATUSES = {
+    JobStatus.DISPATCHED.value,
+    JobStatus.RUNNING.value,
+}
 
 
 def _persist_job(job_id: str, metadata: dict):
@@ -37,14 +45,25 @@ def _log_dir(job_id: str) -> str:
 def _log_path(job_id: str) -> str:
     return os.path.join(_log_dir(job_id), f"{job_id}.log")
 
+def _read_status_payload(job_id: str) -> Optional[dict]:
+    path = _status_path(job_id)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            data.setdefault("job_id", job_id)
+            return data
+    except Exception:
+        return None
+    return None
+
+
 def _read_status_file(job_id: str) -> Optional[str]:
-    p = _status_path(job_id)
-    if os.path.exists(p):
-        try:
-            with open(p) as f:
-                return json.load(f).get("status")
-        except Exception:
-            return None
+    payload = _read_status_payload(job_id)
+    if payload:
+        return payload.get("status")
     return None
 
 def _write_status(job_id: str, status: str, extra: dict | None = None):
@@ -61,19 +80,67 @@ def _write_status(job_id: str, status: str, extra: dict | None = None):
             json.dump(jobs, f, indent=2)
 
 # ---------- API: launch ----------
+def _host_active_count(host: str) -> int:
+    total = 0
+    for job in jobs.values():
+        if job.get("target_host") != host:
+            continue
+        if job.get("status") in CAPACITY_COUNT_STATUSES:
+            total += 1
+    return total
+
+
+def _preferred_host(requested: Optional[str]) -> Optional[str]:
+    if not requested:
+        return None
+    if not job_utils.is_valid_host(requested):
+        raise HTTPException(400, f"Unknown host '{requested}'. Allowed: {settings.AVAILABLE_HOSTS}")
+    return requested
+
+
+def record_host_heartbeat(worker_id: str, info: dict | None = None) -> None:
+    host_heartbeats[worker_id] = {
+        "last_seen": time.time(),
+        "info": info or {},
+    }
+
+
+def _host_status_snapshot() -> dict[str, dict]:
+    now = time.time()
+    known_hosts = set(settings.AVAILABLE_HOSTS) | set(host_heartbeats.keys())
+    snapshot: dict[str, dict] = {}
+    for host in sorted(known_hosts):
+        hb = host_heartbeats.get(host)
+        online = bool(hb and (now - hb["last_seen"]) <= HEARTBEAT_TTL)
+        snapshot[host] = {
+            "online": online,
+            "last_seen": hb["last_seen"] if hb else None,
+            "info": hb["info"] if hb else {},
+            "running": _host_active_count(host),
+        }
+    return snapshot
+
+
 async def launch_simulation(request: JobLaunchRequest):
     job_utils.ensure_directories()
 
-    if not job_utils.is_valid_host(request.target_host):
-        raise HTTPException(400, f"Unknown host '{request.target_host}'. Allowed: {settings.AVAILABLE_HOSTS}")
+    if not settings.AVAILABLE_HOSTS:
+        raise HTTPException(503, "No hosts configured")
 
+    preferred_host = _preferred_host(request.target_host)
     job_id = str(uuid4())
 
     # config
     if request.config_path:
-        config_path = request.config_path
-        with open(os.path.join(settings.CONFIGS_DIR, config_path)) as f:
+        # Accept both "file.yaml" and "configs/file.yaml" style paths
+        config_path = request.config_path.lstrip("/")
+        relative_path = config_path[len("configs/"):] if config_path.startswith("configs/") else config_path
+        relative_path = os.path.normpath(relative_path)
+        if relative_path.startswith(".."):
+            raise HTTPException(400, "Invalid config_path")
+        with open(os.path.join(settings.CONFIGS_DIR, relative_path)) as f:
             config = yaml.safe_load(f)
+        config_path = relative_path
     elif request.config:
         file_name = request.save_as or f"{job_id}.yaml"
         config_path = file_utils.save_config_dict(request.config, file_name)
@@ -93,79 +160,39 @@ async def launch_simulation(request: JobLaunchRequest):
         "job_id": job_id,
         "job_name": job_name,
         "config_path": config_path,
-        "target_host": request.target_host,
+        "target_host": preferred_host,
         "experiment_name": experiment_name,
         "run_name": run_name,
         "status": JobStatus.LAUNCHING.value,
     }
     _persist_job(job_id, meta)
-    job_utils.save_job_info(job_id, job_name, config_path, request.target_host,
+    job_utils.save_job_info(job_id, job_name, config_path, preferred_host or "",
                             container_id="", container_name="", exp=experiment_name, run=run_name)
-    _write_status(job_id, JobStatus.LAUNCHING.value)
+    _write_status(job_id, JobStatus.LAUNCHING.value, {"preferred_host": preferred_host})
 
-    if request.target_host == "local":
-        sim_req = SimulationRequest(config_path=config_path, job_name=job_name)
-        container = docker_manager.run_simulation(job_id, sim_req, settings.VM_SHARED_DATA)
-        meta.update({"container_id": container.id, "container_name": container.name, "status": JobStatus.RUNNING.value})
-        _persist_job(job_id, meta)
-        job_utils.save_job_info(job_id, job_name, config_path, "local",
-                                container.id, container.name, experiment_name, run_name)
-        _write_status(job_id, JobStatus.RUNNING.value)
-        return {
-            "job_id": job_id,
-            "container_id": container.id,
-            "status": "launched",
-            "host": "local",
-            "job_name": job_name,
-        }
-
-    # enqueue for agent (agent applies GPU/network defaults)
-    sim_req = SimulationRequest(config_path=config_path, job_name=job_name)
-    payload = {
+    # enqueue for agent (agent decides how to run the container)
+    job_utils.enqueue_job({
         "job_id": job_id,
-        "image": "calof/opeva_simulator:latest",
-        "container_name": f"opeva_sim_{job_id}_{job_name}",
-        "command": f"--config /data/{sim_req.config_path} --job_id {job_id}",
-        "volumes": [
-            {"host": settings.VM_SHARED_DATA, "container": "/data", "mode": "rw"}
-        ],
-        "env": {
-            "MLFLOW_TRACKING_URI": "http://MAIN-SERVER:5000"
-        }
-    }
-    worker_id = request.target_host
-    job_utils.enqueue_job_for_agent(worker_id, payload)
+        "preferred_host": preferred_host,
+    })
     meta.update({"status": JobStatus.QUEUED.value})
     _persist_job(job_id, meta)
-    _write_status(job_id, JobStatus.QUEUED.value, {"worker_id": worker_id})
-    return {"job_id": job_id, "status": JobStatus.QUEUED.value, "host": worker_id, "job_name": job_name}
+    _write_status(job_id, JobStatus.QUEUED.value, {"preferred_host": preferred_host})
+    return {"job_id": job_id, "status": JobStatus.QUEUED.value, "host": preferred_host, "job_name": job_name}
 
 # ---------- API: status/result/progress/logs ----------
 
 def get_status(job_id: str):
-    """Return the current status for a given job."""
+    """Return the current status payload for a given job."""
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
 
-    # Local jobs: inspect container state + exit code to map to our enum
-    if job.get("target_host") == "local" and job.get("container_id"):
-        state, exit_code = docker_manager.get_container_status(job["container_id"])
-        if state in ("running", "created"):
-            return {"job_id": job_id, "status": JobStatus.RUNNING.value}
-        if state == "exited":
-            mapped = JobStatus.FINISHED.value if (exit_code == 0) else JobStatus.FAILED.value
-            _write_status(job_id, mapped, {"exit_code": exit_code})
-            return {"job_id": job_id, "status": mapped}
-        if state == "not_found":
-            status = _read_status_file(job_id) or JobStatus.NOT_FOUND.value
-            return {"job_id": job_id, "status": status}
-        # unknown → fall back to file
-        status = _read_status_file(job_id) or JobStatus.UNKNOWN.value
-        return {"job_id": job_id, "status": status}
+    payload = _read_status_payload(job_id)
+    if payload:
+        return payload
 
-    # Remote jobs (or local without container_id): file is authoritative
-    status = _read_status_file(job_id) or job.get("status", JobStatus.UNKNOWN.value)
+    status = job.get("status", JobStatus.UNKNOWN.value)
     return {"job_id": job_id, "status": status}
 
 
@@ -204,28 +231,28 @@ def stop_job(job_id: str):
     if not job:
         raise HTTPException(404, "Job not found")
 
-    host = job.get("target_host", "local")
+    host = job.get("target_host") or "local"
     status_now = _read_status_file(job_id) or job.get("status", JobStatus.UNKNOWN.value)
 
-    if host == "local":
-        cid = job.get("container_id")
-        if cid:
-            msg = docker_manager.stop_container(cid)
-            _write_status(job_id, JobStatus.STOPPED.value)
-            return {"message": msg}
+    removed = job_utils.remove_from_queue(job_id)
+
+    if status_now == JobStatus.QUEUED.value and removed:
         _write_status(job_id, JobStatus.CANCELED.value)
-        return {"message": "Local job canceled (not running)"}
-    else:
-        # cancel if still queued
-        if status_now == JobStatus.QUEUED.value:
-            qfile = os.path.join(settings.QUEUE_DIR, host, f"{job_id}.json")
-            if os.path.exists(qfile):
-                os.remove(qfile)
-            _write_status(job_id, JobStatus.CANCELED.value)
-            return {"message": "Remote job canceled (was queued)"}
-        if status_now == JobStatus.RUNNING.value:
-            return {"message": "Remote stop requires agent support; not implemented"}
-        return {"message": f"Remote job is {status_now}; nothing to stop"}
+        if job_id in jobs:
+            jobs[job_id]["status"] = JobStatus.CANCELED.value
+            _persist_job(job_id, jobs[job_id])
+        return {"message": "Job canceled from queue"}
+
+    if host == "local":
+        _write_status(job_id, JobStatus.STOPPED.value)
+        if job_id in jobs:
+            jobs[job_id]["status"] = JobStatus.STOPPED.value
+            _persist_job(job_id, jobs[job_id])
+        return {"message": "Local stop recorded"}
+
+    if status_now == JobStatus.RUNNING.value:
+        return {"message": "Remote stop requires agent support; not implemented"}
+    return {"message": f"Remote job is {status_now}; nothing to stop"}
 
 def list_jobs():
     result = []
@@ -236,12 +263,7 @@ def list_jobs():
             with open(ipath) as f:
                 info = json.load(f)
 
-        if job.get("target_host") == "local" and job.get("container_id"):
-            status = docker_manager.get_container_status(job["container_id"])
-            if not status or status == JobStatus.NOT_FOUND.value:
-                status = _read_status_file(job_id) or job.get("status", JobStatus.UNKNOWN.value)
-        else:
-            status = _read_status_file(job_id) or job.get("status", JobStatus.UNKNOWN.value)
+        status = get_status(job_id)["status"]
 
         result.append({"job_id": job_id, "status": status, "job_info": info})
     return result
@@ -262,31 +284,94 @@ def delete_job(job_id: str):
     return {"message": f"Job {job_id} deleted successfully"}
 
 def get_hosts():
-    return {"available_hosts": settings.AVAILABLE_HOSTS}
+    return {
+        "available_hosts": settings.AVAILABLE_HOSTS,
+        "hosts": _host_status_snapshot(),
+    }
 
 # ---------- hooks used by agent endpoints ----------
 def agent_next_job(worker_id: str):
-    job = job_utils.agent_pop_next_job(worker_id)
-    if not job:
+    job_queue_entry = job_utils.agent_pop_next_job(worker_id)
+    if not job_queue_entry:
         return None
-    _write_status(job["job_id"], JobStatus.DISPATCHED.value, {"worker_id": worker_id})
-    return job
+
+    job_id = job_queue_entry["job_id"]
+
+    meta = jobs.get(job_id)
+    if not meta:
+        meta = job_utils.load_jobs().get(job_id, {})
+
+    config_path = meta.get("config_path")
+    job_name = meta.get("job_name", job_id)
+
+    if not config_path:
+        info_path = _info_path(job_id)
+        if os.path.exists(info_path):
+            with open(info_path) as f:
+                info_data = json.load(f)
+            config_path = info_data.get("config_path")
+            job_name = info_data.get("job_name", job_name)
+        if not config_path:
+            raise HTTPException(500, f"Missing config path for job {job_id}")
+
+    response = {
+        "job_id": job_id,
+        "job_name": job_name,
+        "config_path": config_path,
+        "preferred_host": job_queue_entry.get("preferred_host"),
+    }
+
+    meta["status"] = JobStatus.DISPATCHED.value
+    meta["target_host"] = worker_id
+    _persist_job(job_id, meta)
+
+    _write_status(job_id, JobStatus.DISPATCHED.value, {"worker_id": worker_id})
+
+    info_path = _info_path(job_id)
+    info = {}
+    if os.path.exists(info_path):
+        with open(info_path) as f:
+            info = json.load(f)
+    info["target_host"] = worker_id
+    if "job_name" not in info:
+        info["job_name"] = job_name
+    if "config_path" not in info:
+        info["config_path"] = config_path
+    with open(info_path, "w") as f:
+        json.dump(info, f, indent=2)
+
+    return response
 
 def agent_update_status(job_id: str, status: str, extra: dict | None = None):
     extra = extra or {}
     _write_status(job_id, status, extra)
 
+    worker = extra.get("worker_id")
+    if worker and job_id in jobs:
+        meta = jobs[job_id]
+        if meta.get("target_host") != worker:
+            meta["target_host"] = worker
+            _persist_job(job_id, meta)
+
     # If agent provided container info, persist to job_info.json and job_track.json
-    if "container_id" in extra or "container_name" in extra:
+    if {"container_id", "container_name", "exit_code", "error", "details"} & extra.keys():
         info_path = _info_path(job_id)
         info = {}
         if os.path.exists(info_path):
             with open(info_path) as f:
                 info = json.load(f)
+        if worker:
+            info["target_host"] = worker
         if "container_id" in extra:
             info["container_id"] = extra["container_id"]
         if "container_name" in extra:
             info["container_name"] = extra["container_name"]
+        if "exit_code" in extra:
+            info["exit_code"] = extra["exit_code"]
+        if "error" in extra:
+            info["error"] = extra["error"]
+        if "details" in extra and isinstance(extra["details"], dict):
+            info["details"] = extra["details"]
         with open(info_path, "w") as f:
             json.dump(info, f, indent=2)
 
@@ -297,6 +382,12 @@ def agent_update_status(job_id: str, status: str, extra: dict | None = None):
                 updated["container_id"] = extra["container_id"]
             if "container_name" in extra:
                 updated["container_name"] = extra["container_name"]
+            if "exit_code" in extra:
+                updated["exit_code"] = extra["exit_code"]
+            if "error" in extra:
+                updated["error"] = extra["error"]
+            if "details" in extra and isinstance(extra["details"], dict):
+                updated["details"] = extra["details"]
             _persist_job(job_id, updated)
         elif job_id in jobs:
             # fall back to the in-memory version if the track file is missing
@@ -305,6 +396,12 @@ def agent_update_status(job_id: str, status: str, extra: dict | None = None):
                 meta["container_id"] = extra["container_id"]
             if "container_name" in extra:
                 meta["container_name"] = extra["container_name"]
+            if "exit_code" in extra:
+                meta["exit_code"] = extra["exit_code"]
+            if "error" in extra:
+                meta["error"] = extra["error"]
+            if "details" in extra and isinstance(extra["details"], dict):
+                meta["details"] = extra["details"]
             _persist_job(job_id, meta)
 
     return {"ok": True}

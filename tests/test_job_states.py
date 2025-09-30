@@ -29,18 +29,24 @@ from app.models.job import JobLaunchRequest
 
 
 def test_get_status_local_created(monkeypatch):
-    job_service.jobs['job1'] = {'container_id': 'abc', 'target_host': 'local'}
-    monkeypatch.setattr(job_service.docker_manager, 'get_container_status', lambda cid: ('created', None))
-    monkeypatch.setattr(job_service.job_utils, 'save_job', lambda *args, **kwargs: None)
+    job_service.jobs['job1'] = {'target_host': 'local', 'status': JobStatus.QUEUED.value}
+    monkeypatch.setattr(
+        job_service,
+        '_read_status_payload',
+        lambda jid: {'job_id': jid, 'status': JobStatus.RUNNING.value},
+    )
     status = job_service.get_status('job1')
     assert status['status'] == JobStatus.RUNNING.value
     job_service.jobs.pop('job1', None)
 
 
 def test_get_status_remote_created(monkeypatch):
-    job_service.jobs['job2'] = {'container_id': 'abc', 'target_host': 'remote', 'status': JobStatus.DISPATCHED.value}
-    monkeypatch.setattr(job_service.docker_manager, 'get_container_status', lambda cid: ('created', None))
-    monkeypatch.setattr(job_service.job_utils, 'save_job', lambda *args, **kwargs: None)
+    job_service.jobs['job2'] = {'target_host': 'remote', 'status': JobStatus.QUEUED.value}
+    monkeypatch.setattr(
+        job_service,
+        '_read_status_payload',
+        lambda jid: {'job_id': jid, 'status': JobStatus.DISPATCHED.value},
+    )
     status = job_service.get_status('job2')
     assert status['status'] == JobStatus.DISPATCHED.value
     job_service.jobs.pop('job2', None)
@@ -88,10 +94,10 @@ def test_launch_remote_updates_cache(monkeypatch, tmp_path):
 
     queued = []
 
-    def fake_enqueue(worker_id, payload):
-        queued.append((worker_id, payload))
+    def fake_enqueue(payload):
+        queued.append(payload)
 
-    monkeypatch.setattr(job_service.job_utils, 'enqueue_job_for_agent', fake_enqueue)
+    monkeypatch.setattr(job_service.job_utils, 'enqueue_job', fake_enqueue)
 
     request = JobLaunchRequest(config_path="demo.yaml", target_host="remote1")
 
@@ -101,5 +107,5 @@ def test_launch_remote_updates_cache(monkeypatch, tmp_path):
     job_id = result["job_id"]
     assert job_id in job_service.jobs
     assert job_service.jobs[job_id]["status"] == JobStatus.QUEUED.value
-    assert queued and queued[0][0] == "remote1"
-    assert queued[0][1]["job_id"] == job_id
+    assert queued and queued[0]["preferred_host"] == "remote1"
+    assert queued[0]["job_id"] == job_id

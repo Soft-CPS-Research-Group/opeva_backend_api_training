@@ -1,7 +1,7 @@
 # app/controllers/agent_controller.py
 from fastapi import HTTPException
 from app.services import job_service
-from app.models.agent import NextJobRequest, StatusRequest
+from app.models.agent import NextJobRequest, StatusRequest, HeartbeatRequest
 
 def next_job(req: NextJobRequest):
     job = job_service.agent_next_job(req.worker_id)
@@ -12,13 +12,14 @@ def next_job(req: NextJobRequest):
 
 def job_status(req: StatusRequest):
     try:
-        extra = {}
-        if req.worker_id is not None:
-            extra["worker_id"] = req.worker_id
-        if req.container_id is not None:
-            extra["container_id"] = req.container_id
-        if req.container_name is not None:
-            extra["container_name"] = req.container_name
-        return job_service.agent_update_status(req.job_id, req.status, extra)
+        payload = req.model_dump(exclude_none=True)
+        job_id = payload.pop("job_id")
+        status = payload.pop("status")
+        return job_service.agent_update_status(job_id, status, payload)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def heartbeat(req: HeartbeatRequest):
+    job_service.record_host_heartbeat(req.worker_id, req.info or {})
+    return {"ok": True}
