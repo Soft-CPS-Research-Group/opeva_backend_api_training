@@ -159,6 +159,25 @@ def test_run_simulation_local_is_queued(api_client, monkeypatch):
     assert any(j["status"] == JobStatus.QUEUED.value for j in jobs_resp)
 
 
+def test_queue_endpoint_lists_entries(api_client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AVAILABLE_HOSTS", ["worker-a"])
+
+    payload = {"experiment": {"name": "Queued", "run_name": "Job"}}
+    response = api_client.post(
+        "/run-simulation",
+        json={"config": payload, "target_host": "worker-a"},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    queue_resp = api_client.get("/queue")
+    assert queue_resp.status_code == 200
+    entries = queue_resp.json()
+    assert any(entry.get("job_id") == job_id for entry in entries)
+
+
 def test_agent_job_status_updates_exit_code(api_client, monkeypatch):
     from app.config import settings
     from app.services import job_service

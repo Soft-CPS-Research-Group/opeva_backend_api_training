@@ -336,6 +336,19 @@ def test_agent_flow_updates_status_and_info():
     assert track[job_id]["status"] == JobStatus.FINISHED.value
 
 
+def test_list_queue_returns_entries(tmp_path, jobs_env):
+    from app.config import settings
+    from app.utils import job_utils
+
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+
+    payload = {"job_id": "job-queued", "preferred_host": "worker-a"}
+    job_utils.enqueue_job(payload)
+
+    entries = job_service.list_queue()
+    assert entries == [payload]
+
+
 def test_host_heartbeat_reporting(monkeypatch):
     settings.AVAILABLE_HOSTS = ["local", "worker-hb"]
 

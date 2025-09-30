@@ -33,6 +33,11 @@ async def stop_job(job_id: str):
 async def list_jobs():
     return job_controller.list_jobs()
 
+
+@router.get("/queue")
+async def list_queue():
+    return job_controller.list_queue()
+
 @router.get("/job-info/{job_id}")
 async def job_info(job_id: str):
     return job_controller.get_job_info(job_id)

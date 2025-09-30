@@ -117,6 +117,27 @@ def agent_pop_next_job(worker_id: str) -> dict | None:
     return None
 
 
+def list_queue() -> list[dict]:
+    """Return pending queue entries ordered by enqueue time."""
+    wdir = settings.QUEUE_DIR
+    if not os.path.isdir(wdir):
+        return []
+    files = sorted(
+        [os.path.join(wdir, f) for f in os.listdir(wdir) if f.endswith(".json")],
+        key=lambda p: os.path.getmtime(p),
+    )
+    entries: list[dict] = []
+    for path in files:
+        try:
+            with open(path) as f:
+                payload = json.load(f)
+            if isinstance(payload, dict):
+                entries.append(payload)
+        except Exception:
+            continue
+    return entries
+
+
 def remove_from_queue(job_id: str) -> bool:
     path = _queue_path(job_id)
     if os.path.exists(path):

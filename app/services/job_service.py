@@ -268,6 +268,10 @@ def list_jobs():
         result.append({"job_id": job_id, "status": status, "job_info": info})
     return result
 
+
+def list_queue():
+    return job_utils.list_queue()
+
 def get_job_info(job_id: str):
     p = _info_path(job_id)
     if not os.path.exists(p):

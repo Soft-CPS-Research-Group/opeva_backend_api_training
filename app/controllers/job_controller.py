@@ -26,6 +26,10 @@ def stop_job(job_id: str):
 def list_jobs():
     return job_service.list_jobs()
 
+
+def list_queue():
+    return job_service.list_queue()
+
 def get_job_info(job_id: str):
     return job_service.get_job_info(job_id)
 

@@ -1,0 +1,560 @@
+{
+  "info": {
+    "_postman_id": "95a9d71c-df18-4bf1-97a4-52b53db69b68",
+    "name": "OPEVA Backend API - Full Test Suite",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "44201499",
+    "_collection_link": "https://tiago-3160580.postman.co/workspace/My-Workspace~0df1379f-266e-4013-82b8-333a3a7f3927/collection/44201499-95a9d71c-df18-4bf1-97a4-52b53db69b68?action=share&source=collection_link&creator=44201499"
+  },
+  "item": [
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "Run Simulation (Config Path)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"config_path\": \"configs/demo.yaml\",\n  \"target_host\": \"worker-a\"\n}"
+            },
+            "url": "{{baseUrl}}/run-simulation"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('job id returned', function () { pm.expect(body).to.have.property('job_id'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Run Simulation (Inline Config)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"config\": {\n    \"experiment\": {\n      \"name\": \"inline_postman_test\",\n      \"run_name\": \"inline-run-01\"\n    }\n  },\n  \"save_as\": \"postman_test_inline.yaml\"\n}"
+            },
+            "url": "{{baseUrl}}/run-simulation"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('job id returned', function () { pm.expect(body).to.have.property('job_id'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/status/{{job_id}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('response has status field', function () { pm.expect(pm.response.json()).to.have.property('status'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Results",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/result/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Progress",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/progress/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/logs/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Logs File",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/file-logs/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Stop Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/stop/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "List All Jobs",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"config\": {\n    \"experiment\": {\n      \"name\": \"inline_postman_test\",\n      \"run_name\": \"inline-run-01\",\n      \"logging\": {\n        \"log_level\": \"INFO\",\n        \"mlflow\": true,\n        \"mlflow_uri\": \"http://mlflow:5000\"\n      }\n    },\n    \"simulator\": {\n      \"dataset_path\": \"/data/datasets/citylearn_challenge_2022_phase_all_plus_evs/schema.json\",\n      \"central_agent\": false,\n      \"reward_function\": \"RewardFunction\"\n    },\n    \"algorithm\": {\n      \"seed\": 22,\n      \"hyperparameters\": {\n        \"checkpoint_interval\": 20,\n        \"steps_between_training_updates\": 5,\n        \"target_update_interval\": 2,\n        \"end_exploration_time_step\": 200,\n        \"end_initial_exploration_time_step\": 100\n      }\n    }\n  },\n  \"save_as\": \"postman_test_inline.yaml\",\n  \"target_host\": \"local\"\n}"
+            },
+            "url": "{{baseUrl}}/jobs"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Job Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/job-info/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Hosts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hosts"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Job and Files",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/job/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "2) Agent Poll: /api/agent/next-job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"worker_id\": \"tiago-laptop\"\n}"
+            },
+            "url": "{{baseUrl}}/api/agent/next-job",
+            "description": "Simulate the worker asking for work. Expect 200 with job payload, or 204 when empty."
+          },
+          "response": []
+        },
+        {
+          "name": "List Queue",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/queue"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('response is array', function () { pm.expect(pm.response.json()).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Experiment-Configs",
+      "item": [
+        {
+          "name": "Create Experiment Config",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"file_name\": \"test_config2.yaml\",\n  \"config\": {\n    \"experiment\": {\n      \"name\": \"real_world_dataset_4houses\",\n      \"run_name\": \"Run 6 - Final Testing Run\",\n      \"resume_training\": false,\n      \"checkpoint_run_id\": \"1234567890abcdef\",\n      \"checkpoint_artifact\": \"latest_checkpoint.pth\",\n      \"use_best_checkpoint_artifact\": false,\n      \"reset_replay_buffer\": false,\n      \"freeze_pretrained_layers\": false,\n      \"save_checkpoints\": true,\n      \"checkpoint_interval_steps\": 5000,\n      \"save_final_model\": true,\n      \"logging\": {\n        \"log_dir\": \"./logs\",\n        \"log_level\": \"DEBUG\",\n        \"mlflow\": true,\n        \"mlflow_uri\": \"file:./mlruns\"\n      }\n    },\n    \"simulator\": {\n      \"dataset_name\": \"citylearn_challenge_2022_phase_all_plus_evs\",\n      \"dataset_path\": \"/data/datasets/citylearn_challenge_2022_phase_all_plus_evs/schema.json\",\n      \"central_agent\": false,\n      \"reward_function\": \"RewardFunction\"\n    },\n    \"algorithm\": {\n      \"seed\": 22,\n      \"hyperparameters\": {\n        \"checkpoint_interval\": 20,\n        \"steps_between_training_updates\": 5,\n        \"target_update_interval\": 2,\n        \"end_exploration_time_step\": 200,\n        \"end_initial_exploration_time_step\": 100,\n        \"num_agents\": null,\n        \"observation_dimensions\": null,\n        \"action_dimensions\": null,\n        \"action_space\": null,\n        \"gamma\": 0.99\n      },\n      \"networks\": {\n        \"actor_network\": {\n          \"class\": \"Actor\",\n          \"params\": {\n            \"layers\": [2048, 1024, 512, 256, 128, 64],\n            \"lr\": 1e-4,\n            \"optimizer_class\": \"Adam\"\n          }\n        },\n        \"critic_network\": {\n          \"class\": \"Critic\",\n          \"params\": {\n            \"layers\": [2048, 1024, 512, 256, 128, 64],\n            \"optimizer_class\": \"Adam\",\n            \"lr\": 1e-3\n          }\n        }\n      },\n      \"replay_buffer\": {\n        \"class\": \"MultiAgentReplayBuffer\",\n        \"params\": {\n          \"capacity\": 100000,\n          \"batch_size\": 512\n        }\n      },\n      \"exploration\": {\n        \"strategy\": \"GaussianNoise\",\n        \"params\": {\n          \"bias\": 0.3,\n          \"sigma\": 0.2,\n          \"decay\": 0.995,\n          \"gamma\": 0.99,\n          \"tau\": 0.001\n        }\n      }\n    }\n  }\n}\n"
+            },
+            "url": "{{baseUrl}}/experiment-config/create"
+          },
+          "response": []
+        },
+        {
+          "name": "List Experiment Configs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/experiment-configs"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Experiment Config by Name",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/experiment-config/test_config.yaml"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Experiment Config",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/experiment-config/test_config.yaml"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Datasets",
+      "item": [
+        {
+          "name": "Create Dataset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"teste_3005\",\n  \"site_id\": \"i-charging_headquarters\",\n  \"citylearn_configs\": {\n    \"parameter1\": \"value1\",\n    \"parameter2\": 42\n  },\n  \"description\": \"testing a descriptions\",\n  \"period\": 60,\n  \"from_ts\": \"2025-05-27 00:00:00\",\n  \"until_ts\": \"2025-05-27 18:00:00\"\n}"
+            },
+            "url": "{{baseUrl}}/dataset"
+          },
+          "response": []
+        },
+        {
+          "name": "List Datasets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/datasets"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Dataset and Files",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/dataset/adeusola2"
+          },
+          "response": []
+        },
+        {
+          "name": "List Dates Available",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/dataset/dates-available/living_lab"
+          },
+          "response": []
+        },
+        {
+          "name": "DownloadDataset",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/dataset/download/okkokoko"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "mongo",
+      "item": [
+        {
+          "name": "Get Data",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/real-time-data/i-charging_headquarters"
+          },
+          "response": []
+        },
+        {
+          "name": "Get X Last Minutes of Data",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/real-time-data/i-charging_headquarters?minutes=600"
+          },
+          "response": []
+        },
+        {
+          "name": "Sites",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/sites"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Schema",
+      "item": [
+        {
+          "name": "Create Site and Schema",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"site\": \"living_lab_test_schema\",\r\n    /** \r\n* Paste one or more documents here\r\n*/\r\n    \"schema\": {\r\n        \"buildings\": {\r\n            \"R-H-01\": {\r\n                \"type\": \"citylearn.building.LSTMDynamicsBuilding\",\r\n                \"include\": true,\r\n                \"energy_simulation\": \"R-H-01.csv\",\r\n                \"weather\": \"weather.csv\",\r\n                \"carbon_intensity\": \"carbon_intensity.csv\",\r\n                \"pricing\": \"pricing.csv\",\r\n                \"inactive_observations\": [],\r\n                \"inactive_actions\": [],\r\n                \"cooling_device\": {\r\n                    \"type\": \"citylearn.energy_model.HeatPump\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 1\r\n                    },\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 4.109619617462158,\r\n                        \"efficiency\": 0.2535049749071043,\r\n                        \"target_cooling_temperature\": 7.991821357673299,\r\n                        \"target_heating_temperature\": 45\r\n                    }\r\n                },\r\n                \"dhw_device\": {\r\n                    \"type\": \"citylearn.energy_model.ElectricHeater\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 1\r\n                    },\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 4.861171245574951,\r\n                        \"efficiency\": 0.939146312056097\r\n                    }\r\n                },\r\n                \"dhw_storage\": {\r\n                    \"type\": \"citylearn.energy_model.StorageTank\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 0.5\r\n                    },\r\n                    \"attributes\": {\r\n                        \"capacity\": 2.2826755046844482,\r\n                        \"loss_coefficient\": 0.003212187876499649\r\n                    }\r\n                },\r\n                \"electrical_storage\": {\r\n                    \"type\": \"citylearn.energy_model.Battery\",\r\n                    \"autosize\": false,\r\n                    \"attributes\": {\r\n                        \"capacity\": 4,\r\n                        \"efficiency\": 0.95,\r\n                        \"capacity_loss_coefficient\": 0.00001,\r\n                        \"loss_coefficient\": 0.0001,\r\n                        \"nominal_power\": 3.32,\r\n                        \"power_efficiency_curve\": [\r\n                            [\r\n                                0,\r\n                                0.8799999999999999\r\n                            ],\r\n                            [\r\n                                0.3,\r\n                                0.8799999999999999\r\n                            ],\r\n                            [\r\n                                0.7,\r\n                                0.95\r\n                            ],\r\n                            [\r\n                                0.8,\r\n                                0.95\r\n                            ],\r\n                            [\r\n                                1,\r\n                                0.8999999999999999\r\n                            ]\r\n                        ],\r\n                        \"depth_of_discharge\": 0.8\r\n                    }\r\n                },\r\n                \"pv\": {\r\n                    \"type\": \"citylearn.energy_model.PV\",\r\n                    \"autosize\": false,\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 2.4000000000000004\r\n                    }\r\n                },\r\n                \"power_outage\": {\r\n                    \"simulate_power_outage\": true,\r\n                    \"stochastic_power_outage\": true,\r\n                    \"stochastic_power_outage_model\": {\r\n                        \"type\": \"citylearn.power_outage.ReliabilityMetricsPowerOutage\",\r\n                        \"attributes\": {\r\n                            \"random_seed\": 57841,\r\n                            \"saifi\": 1.436,\r\n                            \"caidi\": 331.2\r\n                        }\r\n                    }\r\n                },\r\n                \"dynamics\": {\r\n                    \"type\": \"citylearn.dynamics.LSTMDynamics\",\r\n                    \"attributes\": {\r\n                        \"input_size\": 13,\r\n                        \"hidden_size\": 16,\r\n                        \"num_layers\": 2,\r\n                        \"lookback\": 12,\r\n                        \"filename\": \"Building_1.pth\",\r\n                        \"input_normalization_minimum\": [\r\n                            0,\r\n                            0,\r\n                            21.7,\r\n                            18.88889,\r\n                            0,\r\n                            0,\r\n                            -0.8660254,\r\n                            -1,\r\n                            -1,\r\n                            -1,\r\n                            -0.9749279,\r\n                            -0.90096885,\r\n                            12.83158\r\n                        ],\r\n                        \"input_normalization_maximum\": [\r\n                            931,\r\n                            486.5,\r\n                            42.8,\r\n                            24.444445,\r\n                            3,\r\n                            12.6740625,\r\n                            1.2246469000000002e-16,\r\n                            -0.5,\r\n                            1,\r\n                            1,\r\n                            0.9749279,\r\n                            1,\r\n                            43.536755\r\n                        ],\r\n                        \"input_observation_names\": [\r\n                            \"direct_solar_irradiance\",\r\n                            \"diffuse_solar_irradiance\",\r\n                            \"outdoor_dry_bulb_temperature\",\r\n                            \"indoor_dry_bulb_temperature_cooling_set_point\",\r\n                            \"occupant_count\",\r\n                            \"cooling_demand\",\r\n                            \"month_sin\",\r\n                            \"month_cos\",\r\n                            \"hour_sin\",\r\n                            \"hour_cos\",\r\n                            \"day_type_sin\",\r\n                            \"day_type_cos\",\r\n                            \"indoor_dry_bulb_temperature\"\r\n                        ]\r\n                    }\r\n                }\r\n            },\r\n            \"R-H-02\": {\r\n                \"type\": \"citylearn.building.LSTMDynamicsBuilding\",\r\n                \"include\": true,\r\n                \"energy_simulation\": \"R-H-02.csv\",\r\n                \"weather\": \"weather.csv\",\r\n                \"carbon_intensity\": \"carbon_intensity.csv\",\r\n                \"pricing\": \"pricing.csv\",\r\n                \"inactive_observations\": [],\r\n                \"inactive_actions\": [],\r\n                \"cooling_device\": {\r\n                    \"type\": \"citylearn.energy_model.HeatPump\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 1\r\n                    },\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 2.252523899078369,\r\n                        \"efficiency\": 0.28791926968413395,\r\n                        \"target_cooling_temperature\": 6.016841879471529,\r\n                        \"target_heating_temperature\": 45\r\n                    }\r\n                },\r\n                \"dhw_device\": {\r\n                    \"type\": \"citylearn.energy_model.ElectricHeater\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 1\r\n                    },\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 3.681978464126587,\r\n                        \"efficiency\": 0.8994733722992707\r\n                    }\r\n                },\r\n                \"dhw_storage\": {\r\n                    \"type\": \"citylearn.energy_model.StorageTank\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 0.5\r\n                    },\r\n                    \"attributes\": {\r\n                        \"capacity\": 1.6559207439422607,\r\n                        \"loss_coefficient\": 0.004154877290498826\r\n                    }\r\n                },\r\n                \"electrical_storage\": {\r\n                    \"type\": \"citylearn.energy_model.Battery\",\r\n                    \"autosize\": false,\r\n                    \"attributes\": {\r\n                        \"capacity\": 4,\r\n                        \"efficiency\": 0.95,\r\n                        \"capacity_loss_coefficient\": 0.00001,\r\n                        \"loss_coefficient\": 0.0001,\r\n                        \"nominal_power\": 3.32,\r\n                        \"power_efficiency_curve\": [\r\n                            [\r\n                                0,\r\n                                0.8799999999999999\r\n                            ],\r\n                            [\r\n                                0.3,\r\n                                0.8799999999999999\r\n                            ],\r\n                            [\r\n                                0.7,\r\n                                0.95\r\n                            ],\r\n                            [\r\n                                0.8,\r\n                                0.95\r\n                            ],\r\n                            [\r\n                                1,\r\n                                0.8999999999999999\r\n                            ]\r\n                        ],\r\n                        \"depth_of_discharge\": 0.8\r\n                    }\r\n                },\r\n                \"pv\": {\r\n                    \"type\": \"citylearn.energy_model.PV\",\r\n                    \"autosize\": false,\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 1.2000000000000002\r\n                    }\r\n                },\r\n                \"power_outage\": {\r\n                    \"simulate_power_outage\": true,\r\n                    \"stochastic_power_outage\": true,\r\n                    \"stochastic_power_outage_model\": {\r\n                        \"type\": \"citylearn.power_outage.ReliabilityMetricsPowerOutage\",\r\n                        \"attributes\": {\r\n                            \"random_seed\": 57841,\r\n                            \"saifi\": 1.436,\r\n                            \"caidi\": 331.2\r\n                        }\r\n                    }\r\n                },\r\n                \"dynamics\": {\r\n                    \"type\": \"citylearn.dynamics.LSTMDynamics\",\r\n                    \"attributes\": {\r\n                        \"input_size\": 13,\r\n                        \"hidden_size\": 16,\r\n                        \"num_layers\": 2,\r\n                        \"lookback\": 12,\r\n                        \"filename\": \"Building_2.pth\",\r\n                        \"input_normalization_minimum\": [\r\n                            0,\r\n                            0,\r\n                            21.7,\r\n                            20.444445,\r\n                            0,\r\n                            0,\r\n                            -0.8660254,\r\n                            -1,\r\n                            -1,\r\n                            -1,\r\n                            -0.9749279,\r\n                            -0.90096885,\r\n                            16.119997\r\n                        ],\r\n                        \"input_normalization_maximum\": [\r\n                            931,\r\n                            486.5,\r\n                            42.8,\r\n                            26.666666,\r\n                            1,\r\n                            11.077426,\r\n                            1.2246469000000002e-16,\r\n                            -0.5,\r\n                            1,\r\n                            1,\r\n                            0.9749279,\r\n                            1,\r\n                            42.521355\r\n                        ],\r\n                        \"input_observation_names\": [\r\n                            \"direct_solar_irradiance\",\r\n                            \"diffuse_solar_irradiance\",\r\n                            \"outdoor_dry_bulb_temperature\",\r\n                            \"indoor_dry_bulb_temperature_cooling_set_point\",\r\n                            \"occupant_count\",\r\n                            \"cooling_demand\",\r\n                            \"month_sin\",\r\n                            \"month_cos\",\r\n                            \"hour_sin\",\r\n                            \"hour_cos\",\r\n                            \"day_type_sin\",\r\n                            \"day_type_cos\",\r\n                            \"indoor_dry_bulb_temperature\"\r\n                        ]\r\n                    }\r\n                }\r\n            },\r\n            \"R-H-03\": {\r\n                \"type\": \"citylearn.building.LSTMDynamicsBuilding\",\r\n                \"include\": true,\r\n                \"energy_simulation\": \"R-H-03.csv\",\r\n                \"weather\": \"weather.csv\",\r\n                \"carbon_intensity\": \"carbon_intensity.csv\",\r\n                \"pricing\": \"pricing.csv\",\r\n                \"inactive_observations\": [],\r\n                \"inactive_actions\": [],\r\n                \"cooling_device\": {\r\n                    \"type\": \"citylearn.energy_model.HeatPump\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 1\r\n                    },\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 2.7777018547058105,\r\n                        \"efficiency\": 0.26107700777224274,\r\n                        \"target_cooling_temperature\": 6.217435224703639,\r\n                        \"target_heating_temperature\": 45\r\n                    }\r\n                },\r\n                \"dhw_device\": {\r\n                    \"type\": \"citylearn.energy_model.ElectricHeater\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 1\r\n                    },\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 6.286403179168701,\r\n                        \"efficiency\": 0.9042817996199358\r\n                    }\r\n                },\r\n                \"dhw_storage\": {\r\n                    \"type\": \"citylearn.energy_model.StorageTank\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 0.5\r\n                    },\r\n                    \"attributes\": {\r\n                        \"capacity\": 2.8423399925231934,\r\n                        \"loss_coefficient\": 0.004187329715739613\r\n                    }\r\n                },\r\n                \"electrical_storage\": {\r\n                    \"type\": \"citylearn.energy_model.Battery\",\r\n                    \"autosize\": false,\r\n                    \"attributes\": {\r\n                        \"capacity\": 3.3,\r\n                        \"efficiency\": 0.96,\r\n                        \"capacity_loss_coefficient\": 0.00001,\r\n                        \"loss_coefficient\": 0.00159817,\r\n                        \"nominal_power\": 1.61,\r\n                        \"power_efficiency_curve\": [\r\n                            [\r\n                                0,\r\n                                0.8899999999999999\r\n                            ],\r\n                            [\r\n                                0.3,\r\n                                0.8899999999999999\r\n                            ],\r\n                            [\r\n                                0.7,\r\n                                0.96\r\n                            ],\r\n                            [\r\n                                0.8,\r\n                                0.96\r\n                            ],\r\n                            [\r\n                                1,\r\n                                0.9099999999999999\r\n                            ]\r\n                        ],\r\n                        \"depth_of_discharge\": 0.8\r\n                    }\r\n                },\r\n                \"pv\": {\r\n                    \"type\": \"citylearn.energy_model.PV\",\r\n                    \"autosize\": false,\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 2.4000000000000004\r\n                    }\r\n                },\r\n                \"power_outage\": {\r\n                    \"simulate_power_outage\": true,\r\n                    \"stochastic_power_outage\": true,\r\n                    \"stochastic_power_outage_model\": {\r\n                        \"type\": \"citylearn.power_outage.ReliabilityMetricsPowerOutage\",\r\n                        \"attributes\": {\r\n                            \"random_seed\": 57841,\r\n                            \"saifi\": 1.436,\r\n                            \"caidi\": 331.2\r\n                        }\r\n                    }\r\n                },\r\n                \"dynamics\": {\r\n                    \"type\": \"citylearn.dynamics.LSTMDynamics\",\r\n                    \"attributes\": {\r\n                        \"input_size\": 13,\r\n                        \"hidden_size\": 16,\r\n                        \"num_layers\": 2,\r\n                        \"lookback\": 12,\r\n                        \"filename\": \"Building_3.pth\",\r\n                        \"input_normalization_minimum\": [\r\n                            0,\r\n                            0,\r\n                            21.7,\r\n                            21.666666,\r\n                            0,\r\n                            0,\r\n                            -0.8660254,\r\n                            -1,\r\n                            -1,\r\n                            -1,\r\n                            -0.9749279,\r\n                            -0.90096885,\r\n                            17.278326\r\n                        ],\r\n                        \"input_normalization_maximum\": [\r\n                            931,\r\n                            486.5,\r\n                            42.8,\r\n                            29.444445,\r\n                            2,\r\n                            11.438825,\r\n                            1.2246469000000002e-16,\r\n                            -0.5,\r\n                            1,\r\n                            1,\r\n                            0.9749279,\r\n                            1,\r\n                            43.541588\r\n                        ],\r\n                        \"input_observation_names\": [\r\n                            \"direct_solar_irradiance\",\r\n                            \"diffuse_solar_irradiance\",\r\n                            \"outdoor_dry_bulb_temperature\",\r\n                            \"indoor_dry_bulb_temperature_cooling_set_point\",\r\n                            \"occupant_count\",\r\n                            \"cooling_demand\",\r\n                            \"month_sin\",\r\n                            \"month_cos\",\r\n                            \"hour_sin\",\r\n                            \"hour_cos\",\r\n                            \"day_type_sin\",\r\n                            \"day_type_cos\",\r\n                            \"indoor_dry_bulb_temperature\"\r\n                        ]\r\n                    }\r\n                }\r\n            },\r\n            \"R-H-04\": {\r\n                \"type\": \"citylearn.building.LSTMDynamicsBuilding\",\r\n                \"include\": true,\r\n                \"energy_simulation\": \"R-H-04.csv\",\r\n                \"weather\": \"weather.csv\",\r\n                \"carbon_intensity\": \"carbon_intensity.csv\",\r\n                \"pricing\": \"pricing.csv\",\r\n                \"inactive_observations\": [],\r\n                \"inactive_actions\": [],\r\n                \"cooling_device\": {\r\n                    \"type\": \"citylearn.energy_model.HeatPump\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 1\r\n                    },\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 3.617912530899048,\r\n                        \"efficiency\": 0.22662501763673776,\r\n                        \"target_cooling_temperature\": 7.413165336271659,\r\n                        \"target_heating_temperature\": 45\r\n                    }\r\n                },\r\n                \"dhw_device\": {\r\n                    \"type\": \"citylearn.energy_model.ElectricHeater\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 1\r\n                    },\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 5.879298210144043,\r\n                        \"efficiency\": 0.9173427078174862\r\n                    }\r\n                },\r\n                \"dhw_storage\": {\r\n                    \"type\": \"citylearn.energy_model.StorageTank\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 0.5\r\n                    },\r\n                    \"attributes\": {\r\n                        \"capacity\": 2.6966657638549805,\r\n                        \"loss_coefficient\": 0.0075231454857850955\r\n                    }\r\n                },\r\n                \"electrical_storage\": {\r\n                    \"type\": \"citylearn.energy_model.Battery\",\r\n                    \"autosize\": false,\r\n                    \"attributes\": {\r\n                        \"capacity\": 3.3,\r\n                        \"efficiency\": 0.96,\r\n                        \"capacity_loss_coefficient\": 0.00001,\r\n                        \"loss_coefficient\": 0.00159817,\r\n                        \"nominal_power\": 1.61,\r\n                        \"power_efficiency_curve\": [\r\n                            [\r\n                                0,\r\n                                0.8899999999999999\r\n                            ],\r\n                            [\r\n                                0.3,\r\n                                0.8899999999999999\r\n                            ],\r\n                            [\r\n                                0.7,\r\n                                0.96\r\n                            ],\r\n                            [\r\n                                0.8,\r\n                                0.96\r\n                            ],\r\n                            [\r\n                                1,\r\n                                0.9099999999999999\r\n                            ]\r\n                        ],\r\n                        \"depth_of_discharge\": 0.8\r\n                    }\r\n                },\r\n                \"pv\": {\r\n                    \"type\": \"citylearn.energy_model.PV\",\r\n                    \"autosize\": false,\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 2.8000000000000003\r\n                    }\r\n                },\r\n                \"power_outage\": {\r\n                    \"simulate_power_outage\": true,\r\n                    \"stochastic_power_outage\": true,\r\n                    \"stochastic_power_outage_model\": {\r\n                        \"type\": \"citylearn.power_outage.ReliabilityMetricsPowerOutage\",\r\n                        \"attributes\": {\r\n                            \"random_seed\": 57841,\r\n                            \"saifi\": 1.436,\r\n                            \"caidi\": 331.2\r\n                        }\r\n                    }\r\n                },\r\n                \"dynamics\": {\r\n                    \"type\": \"citylearn.dynamics.LSTMDynamics\",\r\n                    \"attributes\": {\r\n                        \"input_size\": 13,\r\n                        \"hidden_size\": 16,\r\n                        \"num_layers\": 2,\r\n                        \"lookback\": 12,\r\n                        \"filename\": \"Building_4.pth\",\r\n                        \"input_normalization_minimum\": [\r\n                            0,\r\n                            0,\r\n                            21.7,\r\n                            19.444445,\r\n                            0,\r\n                            0,\r\n                            -0.8660254,\r\n                            -1,\r\n                            -1,\r\n                            -1,\r\n                            -0.9749279,\r\n                            -0.90096885,\r\n                            13.732682\r\n                        ],\r\n                        \"input_normalization_maximum\": [\r\n                            931,\r\n                            486.5,\r\n                            42.8,\r\n                            25.555555,\r\n                            2,\r\n                            11.933707,\r\n                            1.2246469000000002e-16,\r\n                            -0.5,\r\n                            1,\r\n                            1,\r\n                            0.9749279,\r\n                            1,\r\n                            47.489506\r\n                        ],\r\n                        \"input_observation_names\": [\r\n                            \"direct_solar_irradiance\",\r\n                            \"diffuse_solar_irradiance\",\r\n                            \"outdoor_dry_bulb_temperature\",\r\n                            \"indoor_dry_bulb_temperature_cooling_set_point\",\r\n                            \"occupant_count\",\r\n                            \"cooling_demand\",\r\n                            \"month_sin\",\r\n                            \"month_cos\",\r\n                            \"hour_sin\",\r\n                            \"hour_cos\",\r\n                            \"day_type_sin\",\r\n                            \"day_type_cos\",\r\n                            \"indoor_dry_bulb_temperature\"\r\n                        ]\r\n                    }\r\n                }\r\n            }\r\n        },\r\n        \"evs\": {\r\n            \"EV1\": {\r\n                \"battery_capacity\": 60,\r\n                \"charging_power\": 22\r\n            }\r\n        }\r\n    }\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/schema/create"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Schema",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"schema\": {\r\n        /** \r\n* Paste one or more documents here\r\n*/\r\n        \"buildings\": {\r\n            \"i-charging_headquarters\": {\r\n                \"type\": \"citylearn.building.LSTMDynamicsBuilding\",\r\n                \"include\": true,\r\n                \"energy_simulation\": \"i-charging_headquarters.csv\",\r\n                \"weather\": \"weather.csv\",\r\n                \"carbon_intensity\": \"carbon_intensity.csv\",\r\n                \"pricing\": \"pricing.csv\",\r\n                \"inactive_observations\": [],\r\n                \"inactive_actions\": [],\r\n                \"cooling_device\": {\r\n                    \"type\": \"citylearn.energy_model.HeatPump\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 1\r\n                    },\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 4.109619617462158,\r\n                        \"efficiency\": 0.2535049749071043,\r\n                        \"target_cooling_temperature\": 7.991821357673299,\r\n                        \"target_heating_temperature\": 45\r\n                    }\r\n                },\r\n                \"dhw_device\": {\r\n                    \"type\": \"citylearn.energy_model.ElectricHeater\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 1\r\n                    },\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 4.861171245574951,\r\n                        \"efficiency\": 0.939146312056097\r\n                    }\r\n                },\r\n                \"dhw_storage\": {\r\n                    \"type\": \"citylearn.energy_model.StorageTank\",\r\n                    \"autosize\": false,\r\n                    \"autosize_attributes\": {\r\n                        \"safety_factor\": 0.5\r\n                    },\r\n                    \"attributes\": {\r\n                        \"capacity\": 2.2826755046844482,\r\n                        \"loss_coefficient\": 0.003212187876499649\r\n                    }\r\n                },\r\n                \"electrical_storage\": {\r\n                    \"type\": \"citylearn.energy_model.Battery\",\r\n                    \"autosize\": false,\r\n                    \"attributes\": {\r\n                        \"capacity\": 4,\r\n                        \"efficiency\": 0.95,\r\n                        \"capacity_loss_coefficient\": 0.00001,\r\n                        \"loss_coefficient\": 0.0001,\r\n                        \"nominal_power\": 3.32,\r\n                        \"power_efficiency_curve\": [\r\n                            [\r\n                                0,\r\n                                0.8799999999999999\r\n                            ],\r\n                            [\r\n                                0.3,\r\n                                0.8799999999999999\r\n                            ],\r\n                            [\r\n                                0.7,\r\n                                0.95\r\n                            ],\r\n                            [\r\n                                0.8,\r\n                                0.95\r\n                            ],\r\n                            [\r\n                                1,\r\n                                0.8999999999999999\r\n                            ]\r\n                        ],\r\n                        \"depth_of_discharge\": 0.8\r\n                    }\r\n                },\r\n                \"pv\": {\r\n                    \"type\": \"citylearn.energy_model.PV\",\r\n                    \"autosize\": false,\r\n                    \"attributes\": {\r\n                        \"nominal_power\": 2.4000000000000004\r\n                    }\r\n                },\r\n                \"power_outage\": {\r\n                    \"simulate_power_outage\": true,\r\n                    \"stochastic_power_outage\": true,\r\n                    \"stochastic_power_outage_model\": {\r\n                        \"type\": \"citylearn.power_outage.ReliabilityMetricsPowerOutage\",\r\n                        \"attributes\": {\r\n                            \"random_seed\": 57841,\r\n                            \"saifi\": 1.436,\r\n                            \"caidi\": 331.2\r\n                        }\r\n                    }\r\n                },\r\n                \"dynamics\": {\r\n                    \"type\": \"citylearn.dynamics.LSTMDynamics\",\r\n                    \"attributes\": {\r\n                        \"input_size\": 13,\r\n                        \"hidden_size\": 16,\r\n                        \"num_layers\": 2,\r\n                        \"lookback\": 12,\r\n                        \"filename\": \"Building_1.pth\",\r\n                        \"input_normalization_minimum\": [\r\n                            0,\r\n                            0,\r\n                            21.7,\r\n                            18.88889,\r\n                            0,\r\n                            0,\r\n                            -0.8660254,\r\n                            -1,\r\n                            -1,\r\n                            -1,\r\n                            -0.9749279,\r\n                            -0.90096885,\r\n                            12.83158\r\n                        ],\r\n                        \"input_normalization_maximum\": [\r\n                            931,\r\n                            486.5,\r\n                            42.8,\r\n                            24.444445,\r\n                            3,\r\n                            12.6740625,\r\n                            1.2246469000000002e-16,\r\n                            -0.5,\r\n                            1,\r\n                            1,\r\n                            0.9749279,\r\n                            1,\r\n                            43.536755\r\n                        ],\r\n                        \"input_observation_names\": [\r\n                            \"direct_solar_irradiance\",\r\n                            \"diffuse_solar_irradiance\",\r\n                            \"outdoor_dry_bulb_temperature\",\r\n                            \"indoor_dry_bulb_temperature_cooling_set_point\",\r\n                            \"occupant_count\",\r\n                            \"cooling_demand\",\r\n                            \"month_sin\",\r\n                            \"month_cos\",\r\n                            \"hour_sin\",\r\n                            \"hour_cos\",\r\n                            \"day_type_sin\",\r\n                            \"day_type_cos\",\r\n                            \"indoor_dry_bulb_temperature\"\r\n                        ]\r\n                    }\r\n                }\r\n            }\r\n        }\r\n    }\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/schema/update/i-charging_headquarters"
+          },
+          "response": []
+        },
+        {
+          "name": "List schema from site",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/schema/site"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/health"
+      },
+      "response": []
+    },
+    {
+      "name": "Agent",
+      "item": [
+        {
+          "name": "Next Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"worker_id\": \"worker-a\"\n}"
+            },
+            "url": "{{baseUrl}}/api/agent/next-job"
+          },
+          "response": []
+        },
+        {
+          "name": "Heartbeat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"worker_id\": \"worker-a\",\n  \"info\": {\n    \"version\": \"1.0.0\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/agent/heartbeat"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('heartbeat ack', function () { pm.expect(pm.response.json()).to.have.property('ok', true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Job Status Update",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"job_id\": \"{{job_id}}\",\n  \"status\": \"finished\",\n  \"worker_id\": \"worker-a\",\n  \"container_id\": \"cid-123\",\n  \"container_name\": \"job-worker-worker-a\",\n  \"exit_code\": 0\n}"
+            },
+            "url": "{{baseUrl}}/api/agent/job-status"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('update acknowledged', function () { pm.expect(pm.response.json()).to.have.property('ok', true); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "job_id",
+      "value": "REPLACE_WITH_JOB_ID"
+    },
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    }
+  ]
+}
