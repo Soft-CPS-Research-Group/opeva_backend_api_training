@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     QUEUE_DIR: str     = os.path.join(VM_SHARED_DATA, "queue")  # for worker-agent jobs
 
     # ── Hosts: simple names. "local" runs on server; others go to that worker's agent ─
-    AVAILABLE_HOSTS: list[str] = ["local", "gpu-server-1", "gpu-server-2", "tiago-laptop"]
+    AVAILABLE_HOSTS: list[str] = ["server", "gpu-server-1", "gpu-server-2", "tiago-laptop"]
 
     # ── Mongo (unchanged from your setup) ───────────────────────────────────────
     MONGO_USER: str = "runtimeUI"
