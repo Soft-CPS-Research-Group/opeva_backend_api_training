@@ -1,5 +1,5 @@
 # app/services/job_service.py
-import os, re, json, yaml, time
+import os, re, json, yaml, time, logging
 from uuid import uuid4
 from typing import Generator, Optional
 from fastapi import HTTPException
@@ -15,6 +15,8 @@ jobs = job_utils.load_jobs()
 HEARTBEAT_TTL = int(os.environ.get("HOST_HEARTBEAT_TTL", "60"))
 host_heartbeats: dict[str, dict] = {}
 
+_LOGGER = logging.getLogger(__name__)
+
 CAPACITY_COUNT_STATUSES = {
     JobStatus.DISPATCHED.value,
     JobStatus.RUNNING.value,
@@ -23,6 +25,7 @@ CAPACITY_COUNT_STATUSES = {
 
 def _persist_job(job_id: str, metadata: dict):
     """Persist job metadata to disk and mirror it in the in-memory cache."""
+    _LOGGER.debug("Persisting job %s (status=%s)", job_id, metadata.get("status"))
     job_utils.save_job(job_id, metadata)
     jobs[job_id] = metadata
 
@@ -70,7 +73,15 @@ def _write_status(job_id: str, status: str, extra: dict | None = None):
     """Persist status to disk and update the in-memory jobs cache."""
     prev = _read_status_file(job_id)
     if prev and not can_transition(prev, status):
+        _LOGGER.error("Invalid status transition for job %s: %s -> %s", job_id, prev, status)
         raise ValueError(f"Invalid status transition {prev} -> {status}")
+    _LOGGER.info(
+        "Job %s status change %s -> %s (extras=%s)",
+        job_id,
+        prev,
+        status,
+        sorted((extra or {}).keys()),
+    )
     job_utils.write_status_file(job_id, status, extra or {})
     if job_id in jobs:
         jobs[job_id]["status"] = status
@@ -101,6 +112,7 @@ def _preferred_host(requested: Optional[str]) -> Optional[str]:
 def record_host_heartbeat(worker_id: str, info: dict | None = None) -> None:
     if not job_utils.is_valid_host(worker_id):
         raise HTTPException(400, f"Unknown worker_id '{worker_id}'. Allowed: {settings.AVAILABLE_HOSTS}")
+    _LOGGER.debug("Heartbeat received from %s (info keys=%s)", worker_id, sorted((info or {}).keys()))
     host_heartbeats[worker_id] = {
         "last_seen": time.time(),
         "info": info or {},
@@ -299,6 +311,7 @@ def get_hosts():
 def agent_next_job(worker_id: str):
     job_queue_entry = job_utils.agent_pop_next_job(worker_id)
     if not job_queue_entry:
+        _LOGGER.debug("Worker %s polled queue but no job was available", worker_id)
         return None
 
     job_id = job_queue_entry["job_id"]
@@ -327,6 +340,14 @@ def agent_next_job(worker_id: str):
         "preferred_host": job_queue_entry.get("preferred_host"),
     }
 
+    _LOGGER.info(
+        "Dispatching job %s to worker %s (config=%s, preferred=%s)",
+        job_id,
+        worker_id,
+        config_path,
+        job_queue_entry.get("preferred_host"),
+    )
+
     meta["status"] = JobStatus.DISPATCHED.value
     meta["target_host"] = worker_id
     _persist_job(job_id, meta)
@@ -350,6 +371,12 @@ def agent_next_job(worker_id: str):
 
 def agent_update_status(job_id: str, status: str, extra: dict | None = None):
     extra = extra or {}
+    _LOGGER.info(
+        "Agent reported status for job %s: %s (extra keys=%s)",
+        job_id,
+        status,
+        sorted(extra.keys()),
+    )
     _write_status(job_id, status, extra)
 
     worker = extra.get("worker_id")
@@ -357,6 +384,7 @@ def agent_update_status(job_id: str, status: str, extra: dict | None = None):
         meta = jobs[job_id]
         if meta.get("target_host") != worker:
             meta["target_host"] = worker
+            _LOGGER.debug("Updating job %s target host to %s", job_id, worker)
             _persist_job(job_id, meta)
 
     # If agent provided container info, persist to job_info.json and job_track.json
@@ -380,6 +408,7 @@ def agent_update_status(job_id: str, status: str, extra: dict | None = None):
             info["details"] = extra["details"]
         with open(info_path, "w") as f:
             json.dump(info, f, indent=2)
+        _LOGGER.debug("Persisted container metadata for job %s", job_id)
 
         tracked = job_utils.load_jobs()
         if job_id in tracked:
@@ -395,6 +424,7 @@ def agent_update_status(job_id: str, status: str, extra: dict | None = None):
             if "details" in extra and isinstance(extra["details"], dict):
                 updated["details"] = extra["details"]
             _persist_job(job_id, updated)
+            _LOGGER.debug("Updated tracked metadata for job %s", job_id)
         elif job_id in jobs:
             # fall back to the in-memory version if the track file is missing
             meta = jobs[job_id]
@@ -409,5 +439,6 @@ def agent_update_status(job_id: str, status: str, extra: dict | None = None):
             if "details" in extra and isinstance(extra["details"], dict):
                 meta["details"] = extra["details"]
             _persist_job(job_id, meta)
+            _LOGGER.debug("Updated in-memory metadata for job %s", job_id)
 
     return {"ok": True}

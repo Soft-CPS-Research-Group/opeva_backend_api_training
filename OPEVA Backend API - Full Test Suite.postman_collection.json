@@ -323,7 +323,43 @@
             "header": [],
             "url": "{{baseUrl}}/hosts"
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "const hosts = body.hosts || {};",
+                  "const rows = Object.entries(hosts).map(([name, stats]) => ({",
+                  "  name,",
+                  "  online: stats && typeof stats.online === 'boolean' ? stats.online : false,",
+                  "  last_seen: stats && stats.last_seen ? new Date(stats.last_seen * 1000).toISOString() : 'n/a',",
+                  "  running: stats && typeof stats.running === 'number' ? stats.running : 0",
+                  "}));",
+                  "rows.forEach(row => console.log(`${row.name} last seen: ${row.last_seen}`));",
+                  "pm.environment.set('hosts_last_seen_rows', JSON.stringify(rows));",
+                  "const template = `",
+                  "<table>",
+                  "  <tr><th>Host</th><th>Online</th><th>Last Seen</th><th>Running</th></tr>",
+                  "  {{#each rows}}",
+                  "    <tr>",
+                  "      <td>{{name}}</td>",
+                  "      <td>{{online}}</td>",
+                  "      <td>{{last_seen}}</td>",
+                  "      <td>{{running}}</td>",
+                  "    </tr>",
+                  "  {{/each}}",
+                  "</table>",
+                  "`;",
+                  "pm.visualizer.set(template, { rows });",
+                  "pm.test('hosts parsed', function () { pm.expect(rows.length).to.be.greaterThan(0); });"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Stop Job",
