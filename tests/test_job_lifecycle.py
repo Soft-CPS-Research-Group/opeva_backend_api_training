@@ -194,6 +194,17 @@ def test_get_status_remote_uses_file():
     assert resp["status"] == JobStatus.DISPATCHED.value
 
 
+def test_record_host_heartbeat_enforces_known_hosts():
+    settings.AVAILABLE_HOSTS = ["local", "worker-a"]
+
+    job_service.record_host_heartbeat("worker-a", {"gpu": True})
+    assert "worker-a" in job_service.host_heartbeats
+
+    with pytest.raises(HTTPException) as exc:
+        job_service.record_host_heartbeat("ghost", {})
+    assert exc.value.status_code == 400
+
+
 def test_list_jobs_reports_latest_status(monkeypatch):
     job_id = "job-list"
     job_service.jobs[job_id] = {

@@ -8,10 +8,10 @@
   },
   "item": [
     {
-      "name": "Jobs",
+      "name": "Agent",
       "item": [
         {
-          "name": "Run Simulation (Config Path)",
+          "name": "Heartbeat",
           "request": {
             "method": "POST",
             "header": [
@@ -22,9 +22,9 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"config_path\": \"configs/demo.yaml\",\n  \"target_host\": \"worker-a\"\n}"
+              "raw": "{\n  \"worker_id\": \"worker-a\",\n  \"info\": {\n    \"version\": \"1.0.0\"\n  }\n}"
             },
-            "url": "{{baseUrl}}/run-simulation"
+            "url": "{{baseUrl}}/api/agent/heartbeat"
           },
           "response": [],
           "event": [
@@ -34,15 +34,14 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
-                  "const body = pm.response.json();",
-                  "pm.test('job id returned', function () { pm.expect(body).to.have.property('job_id'); });"
+                  "pm.test('heartbeat ack', function () { pm.expect(pm.response.json()).to.have.property('ok', true); });"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Run Simulation (Inline Config)",
+          "name": "Next Job",
           "request": {
             "method": "POST",
             "header": [
@@ -53,152 +52,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"config\": {\n    \"experiment\": {\n      \"name\": \"inline_postman_test\",\n      \"run_name\": \"inline-run-01\"\n    }\n  },\n  \"save_as\": \"postman_test_inline.yaml\"\n}"
+              "raw": "{\n  \"worker_id\": \"worker-a\"\n}"
             },
-            "url": "{{baseUrl}}/run-simulation"
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
-                  "const body = pm.response.json();",
-                  "pm.test('job id returned', function () { pm.expect(body).to.have.property('job_id'); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Check Status",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/status/{{job_id}}"
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('response has status field', function () { pm.expect(pm.response.json()).to.have.property('status'); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Get Results",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/result/{{job_id}}"
+            "url": "{{baseUrl}}/api/agent/next-job"
           },
           "response": []
         },
         {
-          "name": "Get Progress",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/progress/{{job_id}}"
-          },
-          "response": []
-        },
-        {
-          "name": "Get Logs",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/logs/{{job_id}}"
-          },
-          "response": []
-        },
-        {
-          "name": "Get Logs File",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/file-logs/{{job_id}}"
-          },
-          "response": []
-        },
-        {
-          "name": "Stop Job",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{baseUrl}}/stop/{{job_id}}"
-          },
-          "response": []
-        },
-        {
-          "name": "List All Jobs",
-          "protocolProfileBehavior": {
-            "disableBodyPruning": true
-          },
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"config\": {\n    \"experiment\": {\n      \"name\": \"inline_postman_test\",\n      \"run_name\": \"inline-run-01\",\n      \"logging\": {\n        \"log_level\": \"INFO\",\n        \"mlflow\": true,\n        \"mlflow_uri\": \"http://mlflow:5000\"\n      }\n    },\n    \"simulator\": {\n      \"dataset_path\": \"/data/datasets/citylearn_challenge_2022_phase_all_plus_evs/schema.json\",\n      \"central_agent\": false,\n      \"reward_function\": \"RewardFunction\"\n    },\n    \"algorithm\": {\n      \"seed\": 22,\n      \"hyperparameters\": {\n        \"checkpoint_interval\": 20,\n        \"steps_between_training_updates\": 5,\n        \"target_update_interval\": 2,\n        \"end_exploration_time_step\": 200,\n        \"end_initial_exploration_time_step\": 100\n      }\n    }\n  },\n  \"save_as\": \"postman_test_inline.yaml\",\n  \"target_host\": \"local\"\n}"
-            },
-            "url": "{{baseUrl}}/jobs"
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Get Job Info",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/job-info/{{job_id}}"
-          },
-          "response": []
-        },
-        {
-          "name": "Hosts",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/hosts"
-          },
-          "response": []
-        },
-        {
-          "name": "Delete Job and Files",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": "{{baseUrl}}/job/{{job_id}}"
-          },
-          "response": []
-        },
-        {
-          "name": "2) Agent Poll: /api/agent/next-job",
+          "name": "Job Status Update",
           "request": {
             "method": "POST",
             "header": [
@@ -209,19 +70,9 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"worker_id\": \"tiago-laptop\"\n}"
+              "raw": "{\n  \"job_id\": \"{{job_id}}\",\n  \"status\": \"finished\",\n  \"worker_id\": \"worker-a\",\n  \"container_id\": \"cid-123\",\n  \"container_name\": \"job-worker-worker-a\",\n  \"exit_code\": 0\n}"
             },
-            "url": "{{baseUrl}}/api/agent/next-job",
-            "description": "Simulate the worker asking for work. Expect 200 with job payload, or 204 when empty."
-          },
-          "response": []
-        },
-        {
-          "name": "List Queue",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/queue"
+            "url": "{{baseUrl}}/api/agent/job-status"
           },
           "response": [],
           "event": [
@@ -231,11 +82,33 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('response is array', function () { pm.expect(pm.response.json()).to.be.an('array'); });"
+                  "pm.test('update acknowledged', function () { pm.expect(pm.response.json()).to.have.property('ok', true); });"
                 ]
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/health"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+              "const body = pm.response.json();",
+              "pm.test(\"status is ok\", function () { pm.expect(body).to.have.property('status', 'ok'); });"
+            ]
+          }
         }
       ]
     },
@@ -290,6 +163,221 @@
       ]
     },
     {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "Run Simulation (Inline Config)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"config\": {\n    \"experiment\": {\n      \"name\": \"inline_postman_test\",\n      \"run_name\": \"inline-run-01\"\n    }\n  },\n  \"save_as\": \"postman_test_inline.yaml\"\n}"
+            },
+            "url": "{{baseUrl}}/run-simulation"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('job id returned', function () { pm.expect(body).to.have.property('job_id'); });",
+                  "pm.collectionVariables.set('job_id', body.job_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/status/{{job_id}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('response has status field', function () { pm.expect(pm.response.json()).to.have.property('status'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Progress",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/progress/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Results",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/result/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/logs/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Logs File",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/file-logs/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "List All Jobs",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"config\": {\n    \"experiment\": {\n      \"name\": \"inline_postman_test\",\n      \"run_name\": \"inline-run-01\",\n      \"logging\": {\n        \"log_level\": \"INFO\",\n        \"mlflow\": true,\n        \"mlflow_uri\": \"http://mlflow:5000\"\n      }\n    },\n    \"simulator\": {\n      \"dataset_path\": \"/data/datasets/citylearn_challenge_2022_phase_all_plus_evs/schema.json\",\n      \"central_agent\": false,\n      \"reward_function\": \"RewardFunction\"\n    },\n    \"algorithm\": {\n      \"seed\": 22,\n      \"hyperparameters\": {\n        \"checkpoint_interval\": 20,\n        \"steps_between_training_updates\": 5,\n        \"target_update_interval\": 2,\n        \"end_exploration_time_step\": 200,\n        \"end_initial_exploration_time_step\": 100\n      }\n    }\n  },\n  \"save_as\": \"postman_test_inline.yaml\",\n  \"target_host\": \"local\"\n}"
+            },
+            "url": "{{baseUrl}}/jobs"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Queue",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/queue"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('response is array', function () { pm.expect(pm.response.json()).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Job Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/job-info/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Hosts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/hosts"
+          },
+          "response": []
+        },
+        {
+          "name": "Stop Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/stop/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Job and Files",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/job/{{job_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Run Simulation (Config Path)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"config_path\": \"configs/demo.yaml\",\n  \"target_host\": \"worker-a\"\n}"
+            },
+            "url": "{{baseUrl}}/run-simulation"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('job id returned', function () { pm.expect(body).to.have.property('job_id'); });",
+                  "pm.collectionVariables.set('job_id', body.job_id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Datasets",
       "item": [
         {
@@ -320,15 +408,6 @@
           "response": []
         },
         {
-          "name": "Delete Dataset and Files",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": "{{baseUrl}}/dataset/adeusola2"
-          },
-          "response": []
-        },
-        {
           "name": "List Dates Available",
           "request": {
             "method": "GET",
@@ -345,12 +424,30 @@
             "url": "{{baseUrl}}/dataset/download/okkokoko"
           },
           "response": []
+        },
+        {
+          "name": "Delete Dataset and Files",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/dataset/adeusola2"
+          },
+          "response": []
         }
       ]
     },
     {
       "name": "mongo",
       "item": [
+        {
+          "name": "Sites",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/sites"
+          },
+          "response": []
+        },
         {
           "name": "Get Data",
           "request": {
@@ -380,15 +477,6 @@
             "url": "{{baseUrl}}/real-time-data/i-charging_headquarters?minutes=600"
           },
           "response": []
-        },
-        {
-          "name": "Sites",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/sites"
-          },
-          "response": []
         }
       ]
     },
@@ -410,6 +498,15 @@
               }
             },
             "url": "{{baseUrl}}/schema/create"
+          },
+          "response": []
+        },
+        {
+          "name": "List schema from site",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/schema/site"
           },
           "response": []
         },
@@ -442,107 +539,6 @@
             "url": "{{baseUrl}}/schema/update/i-charging_headquarters"
           },
           "response": []
-        },
-        {
-          "name": "List schema from site",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/schema/site"
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Health Check",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "{{baseUrl}}/health"
-      },
-      "response": []
-    },
-    {
-      "name": "Agent",
-      "item": [
-        {
-          "name": "Next Job",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"worker_id\": \"worker-a\"\n}"
-            },
-            "url": "{{baseUrl}}/api/agent/next-job"
-          },
-          "response": []
-        },
-        {
-          "name": "Heartbeat",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"worker_id\": \"worker-a\",\n  \"info\": {\n    \"version\": \"1.0.0\"\n  }\n}"
-            },
-            "url": "{{baseUrl}}/api/agent/heartbeat"
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('heartbeat ack', function () { pm.expect(pm.response.json()).to.have.property('ok', true); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Job Status Update",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"job_id\": \"{{job_id}}\",\n  \"status\": \"finished\",\n  \"worker_id\": \"worker-a\",\n  \"container_id\": \"cid-123\",\n  \"container_name\": \"job-worker-worker-a\",\n  \"exit_code\": 0\n}"
-            },
-            "url": "{{baseUrl}}/api/agent/job-status"
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('update acknowledged', function () { pm.expect(pm.response.json()).to.have.property('ok', true); });"
-                ]
-              }
-            }
-          ]
         }
       ]
     }

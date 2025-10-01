@@ -99,6 +99,8 @@ def _preferred_host(requested: Optional[str]) -> Optional[str]:
 
 
 def record_host_heartbeat(worker_id: str, info: dict | None = None) -> None:
+    if not job_utils.is_valid_host(worker_id):
+        raise HTTPException(400, f"Unknown worker_id '{worker_id}'. Allowed: {settings.AVAILABLE_HOSTS}")
     host_heartbeats[worker_id] = {
         "last_seen": time.time(),
         "info": info or {},
