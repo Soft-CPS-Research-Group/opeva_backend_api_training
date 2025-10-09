@@ -1,0 +1,148 @@
+@startuml
+skinparam classAttributeIconSize 0
+hide empty members
+
+enum JobStatus {
+  launching
+  queued
+  dispatched
+  running
+  finished
+  failed
+  stopped
+  canceled
+  not_found
+  unknown
+}
+
+class Job {
+  jobId: str
+  jobName: str
+  status: JobStatus
+  configPath: str
+  preferredHost: str?
+  targetHost: str?
+  experimentName: str
+  runName: str
+  containerId: str?
+  containerName: str?
+}
+
+class JobInfo {
+  jobId: str
+  jobName: str
+  configPath: str
+  targetHost: str
+  containerId: str
+  containerName: str
+  experimentName: str
+  runName: str
+}
+
+class JobStatusSnapshot {
+  jobId: str
+  status: JobStatus
+  workerId: str?
+  containerId: str?
+  exitCode: int?
+  error: str?
+  details: dict?
+}
+
+class JobResult {
+  path: str
+  payload: dict
+}
+
+class JobProgress {
+  path: str
+  payload: dict
+}
+
+class JobRegistry {
+  jobTrackFile: str
+  jobs: dict[str, Job]
+}
+
+class JobQueue {
+  queueDir: str
+}
+
+class JobQueueEntry {
+  jobId: str
+  preferredHost: str?
+  claimedBy: str?
+}
+
+class WorkerAgent {
+  workerId: str
+  sharedPath: str
+}
+
+class Host {
+  name: str
+  capacity: int?
+}
+
+class HostHeartbeat {
+  workerId: str
+  lastSeen: datetime
+  info: dict
+}
+
+class ConfigFile {
+  fileName: str
+  content: dict
+  path: str
+}
+
+class Dataset {
+  name: str
+  description: str
+  periodMinutes: int
+  fromTs: datetime?
+  untilTs: datetime?
+}
+
+class DatasetConfig {
+  citylearnConfig: dict
+}
+
+class MongoSite {
+  siteId: str
+}
+
+class Schema {
+  buildings: dict
+}
+
+class MongoCollection {
+  name: str
+  timestampedData: list
+}
+
+JobRegistry "1" o-- "*" Job
+Job "1" o-- "1" JobInfo : persisted as
+Job "1" o-- "1" JobStatusSnapshot : current status
+Job "1" --> "0..1" JobResult : produces
+Job "1" --> "0..1" JobProgress : reports
+Job "1" --> "1" ConfigFile : uses
+JobQueue "1" o-- "*" JobQueueEntry
+JobQueueEntry "*" --> "1" Job
+JobRegistry "1" --> "1" JobQueue : enqueues
+
+WorkerAgent "1" --> "*" JobQueueEntry : claims
+WorkerAgent "1" --> "*" Job : executes
+WorkerAgent "1" --> "*" JobStatusSnapshot : updates
+WorkerAgent "1" --> "1" Host : runs on
+Host "1" o-- "0..*" HostHeartbeat
+
+Dataset "1" --> "1" DatasetConfig
+Dataset "1" --> "1" MongoSite : pulls from
+Dataset "1" --> "1" Schema : aligns to
+Dataset "*" --> "*" MongoCollection : aggregates
+MongoSite "1" o-- "1" Schema
+MongoSite "1" o-- "*" MongoCollection
+
+ConfigFile "1" --> "0..1" DatasetConfig : may seed
+@enduml
