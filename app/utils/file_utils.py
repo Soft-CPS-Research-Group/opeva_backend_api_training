@@ -72,7 +72,7 @@ def parse_timestamp(ts):
 
     raise TypeError(f"Unsupported timestamp type: {type(ts)}")
 
-def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, from_ts: str = None, until_ts: str = None):
+def create_dataset_dir(name: str, site_id: str, config: dict, description: str = "", period: int = 60, from_ts: str = None, until_ts: str = None):
     # Create the target dataset directory
     path = os.path.join(settings.DATASETS_DIR, name)
     os.makedirs(path, exist_ok=True)
@@ -516,6 +516,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, period: int = 60, 
     # Combine the configuration with the structure and write to JSON
     schema = {
         **config,
+        "description": description,
         "structure": structure_doc
     }
 
