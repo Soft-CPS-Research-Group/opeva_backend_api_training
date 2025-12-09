@@ -47,22 +47,25 @@ class Settings(BaseSettings):
     ]
 
     EV_DATASET_CSV_HEADER: ClassVar[dict[str, str]] = {
-        "electric_vehicle_charger_state" : "first",
-        "power" : "first",
-        "electric_vehicle_id" : "first",
-        "electric_vehicle_battery_capacity_khw" : "first",
-        "current_soc" : "first",
-        "electric_vehicle_departure_time" : "first",
-        "electric_vehicle_required_soc_departure" : "first",
-        "electric_vehicle_estimated_arrival_time" : "first",
-        "electric_vehicle_estimated_soc_arrival" : "first"
+        "timestamp": "first",
+        "electric_vehicle_charger_state": "first",
+        "power": "first",
+        "electric_vehicle_id": "first",
+        "electric_vehicle_battery_capacity_khw": "first",
+        "current_soc": "first",
+        "electric_vehicle_departure_time": "first",
+        "electric_vehicle_required_soc_departure": "first",
+        "electric_vehicle_estimated_arrival_time": "first",
+        "electric_vehicle_estimated_soc_arrival": "first",
+        "charger": "first",
+        "mode": "first"
     }
 
     PRICE_DATASET_CSV_HEADER: ClassVar[dict[str, str]] = {
-        "electricity_pricing" : "mean",
-        "electricity_pricing_predicted_1" : "",
-        "electricity_pricing_predicted_2" : "",
-        "electricity_pricing_predicted_3" : ""
+        "energy_price": "mean",
+        "energy_price_predicted_1": "",
+        "energy_price_predicted_2": "",
+        "energy_price_predicted_3": ""
     }
 
     def mongo_uri(self, db_name: str) -> str:
