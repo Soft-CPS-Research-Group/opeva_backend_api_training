@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -168,6 +169,7 @@ def test_get_status_updates_on_exit(monkeypatch):
         "target_host": "local",
         "status": JobStatus.RUNNING.value,
     }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
     job_dir = Path(settings.JOBS_DIR) / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     job_utils.write_status_file(job_id, JobStatus.FAILED.value, {"exit_code": 5})
@@ -187,6 +189,7 @@ def test_get_status_remote_uses_file():
         "target_host": "remote1",
         "status": JobStatus.QUEUED.value,
     }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
     job_dir = Path(settings.JOBS_DIR) / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     job_utils.write_status_file(job_id, JobStatus.DISPATCHED.value, {})
@@ -215,6 +218,7 @@ def test_list_jobs_reports_latest_status(monkeypatch):
         "target_host": "remote",
         "status": JobStatus.QUEUED.value,
     }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
     job_dir = Path(settings.JOBS_DIR) / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     job_utils.write_status_file(job_id, JobStatus.RUNNING.value, {})
@@ -284,6 +288,7 @@ def test_agent_flow_updates_status_and_info():
         "experiment_name": "Experiment",
         "run_name": "Run",
     }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
     job_utils.save_job_info(
         job_id,
         "AgentJob",
@@ -388,14 +393,15 @@ def test_stop_job_local(monkeypatch):
         "target_host": "local",
         "status": JobStatus.RUNNING.value,
     }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
     job_dir = Path(settings.JOBS_DIR) / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     job_utils.write_status_file(job_id, JobStatus.RUNNING.value, {})
 
     resp = job_service.stop_job(job_id)
-    assert "Local stop" in resp["message"]
+    assert "Stop requested" in resp["message"]
     status_data = json.loads((job_dir / "status.json").read_text())
-    assert status_data["status"] == JobStatus.STOPPED.value
+    assert status_data["status"] == JobStatus.STOP_REQUESTED.value
 
 
 def test_stop_job_remote_removes_queue():
@@ -405,6 +411,7 @@ def test_stop_job_remote_removes_queue():
         "target_host": "worker-b",
         "status": JobStatus.QUEUED.value,
     }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
     job_dir = Path(settings.JOBS_DIR) / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     job_utils.write_status_file(job_id, JobStatus.QUEUED.value, {})
@@ -423,6 +430,258 @@ def test_stop_job_remote_removes_queue():
     assert not queue_file.exists()
     status_data = json.loads((job_dir / "status.json").read_text())
     assert status_data["status"] == JobStatus.CANCELED.value
+
+
+def test_stop_job_running_requests_and_worker_stops():
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+    job_id = "job-stop-requested"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "status": JobStatus.RUNNING.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    job_utils.write_status_file(job_id, JobStatus.RUNNING.value, {})
+
+    resp = job_service.stop_job(job_id)
+    assert "Stop requested" in resp["message"]
+    status_poll = job_service.get_status(job_id)
+    assert status_poll["status"] == JobStatus.STOP_REQUESTED.value
+
+    job_service.agent_update_status(
+        job_id,
+        JobStatus.STOPPED.value,
+        {"worker_id": "worker-a"},
+    )
+    status_final = json.loads((job_dir / "status.json").read_text())
+    assert status_final["status"] == JobStatus.STOPPED.value
+    track = json.loads(Path(settings.JOB_TRACK_FILE).read_text())
+    assert track[job_id]["status"] == JobStatus.STOPPED.value
+
+
+def test_agent_update_status_rejects_unknown_job():
+    with pytest.raises(HTTPException) as exc:
+        job_service.agent_update_status("missing-job", JobStatus.RUNNING.value, {"worker_id": "worker-a"})
+    assert exc.value.status_code == 404
+
+
+def test_agent_update_status_rejects_invalid_status():
+    job_id = "job-invalid-status"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "status": JobStatus.QUEUED.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    job_utils.write_status_file(job_id, JobStatus.QUEUED.value, {})
+
+    with pytest.raises(HTTPException) as exc:
+        job_service.agent_update_status(job_id, "not-a-status", {"worker_id": "worker-a"})
+    assert exc.value.status_code == 400
+
+
+def test_agent_update_status_blocks_invalid_transition():
+    job_id = "job-bad-transition"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "status": JobStatus.QUEUED.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    job_utils.write_status_file(job_id, JobStatus.QUEUED.value, {})
+
+    with pytest.raises(HTTPException) as exc:
+        job_service.agent_update_status(job_id, JobStatus.RUNNING.value, {"worker_id": "worker-a"})
+    assert exc.value.status_code == 409
+
+    status_data = json.loads((job_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.QUEUED.value
+
+
+def test_agent_update_status_idempotent():
+    job_id = "job-idempotent"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "status": JobStatus.RUNNING.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    job_utils.write_status_file(job_id, JobStatus.RUNNING.value, {})
+
+    resp = job_service.agent_update_status(job_id, JobStatus.RUNNING.value, {"worker_id": "worker-a"})
+    assert resp["ok"] is True
+    status_data = json.loads((job_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.RUNNING.value
+
+
+def test_mark_stale_dispatched_requeues(monkeypatch):
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+    monkeypatch.setattr(settings, "JOB_STATUS_TTL", 1)
+
+    job_id = "job-stale-dispatched"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "preferred_host": "worker-a",
+        "require_host": True,
+        "status": JobStatus.DISPATCHED.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    stale_ts = time.time() - 10
+    (job_dir / "status.json").write_text(
+        json.dumps({"job_id": job_id, "status": JobStatus.DISPATCHED.value, "status_updated_at": stale_ts})
+    )
+
+    job_service._mark_stale_jobs()
+
+    status_data = json.loads((job_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.QUEUED.value
+    queue_file = Path(settings.QUEUE_DIR) / f"{job_id}.json"
+    assert queue_file.exists()
+    track = json.loads(Path(settings.JOB_TRACK_FILE).read_text())
+    assert track[job_id]["status"] == JobStatus.QUEUED.value
+
+
+def test_mark_stale_running_fails(monkeypatch):
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+    monkeypatch.setattr(settings, "JOB_STATUS_TTL", 1)
+
+    job_id = "job-stale-running"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "status": JobStatus.RUNNING.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    stale_ts = time.time() - 10
+    (job_dir / "status.json").write_text(
+        json.dumps({"job_id": job_id, "status": JobStatus.RUNNING.value, "status_updated_at": stale_ts})
+    )
+
+    job_service._mark_stale_jobs()
+
+    status_data = json.loads((job_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.FAILED.value
+    track = json.loads(Path(settings.JOB_TRACK_FILE).read_text())
+    assert track[job_id]["status"] == JobStatus.FAILED.value
+
+
+def test_ops_requeue_dispatched():
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+    job_id = "job-ops-requeue"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "preferred_host": "worker-a",
+        "require_host": True,
+        "status": JobStatus.DISPATCHED.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    job_utils.write_status_file(job_id, JobStatus.DISPATCHED.value, {})
+
+    resp = job_service.ops_requeue_job(job_id)
+    assert resp["status"] == JobStatus.QUEUED.value
+    status_data = json.loads((job_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.QUEUED.value
+    queue_file = Path(settings.QUEUE_DIR) / f"{job_id}.json"
+    assert queue_file.exists()
+
+
+def test_ops_requeue_running_requires_force():
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+    job_id = "job-ops-requeue-running"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "status": JobStatus.RUNNING.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    job_utils.write_status_file(job_id, JobStatus.RUNNING.value, {})
+
+    with pytest.raises(HTTPException) as exc:
+        job_service.ops_requeue_job(job_id)
+    assert exc.value.status_code == 409
+
+    resp = job_service.ops_requeue_job(job_id, force=True)
+    assert resp["status"] == JobStatus.QUEUED.value
+    status_data = json.loads((job_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.QUEUED.value
+
+
+def test_ops_fail_and_cancel():
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+
+    fail_id = "job-ops-fail"
+    job_service.jobs[fail_id] = {
+        "job_id": fail_id,
+        "target_host": "worker-a",
+        "status": JobStatus.DISPATCHED.value,
+    }
+    job_utils.save_job(fail_id, job_service.jobs[fail_id])
+    fail_dir = Path(settings.JOBS_DIR) / fail_id
+    fail_dir.mkdir(parents=True, exist_ok=True)
+    job_utils.write_status_file(fail_id, JobStatus.DISPATCHED.value, {})
+
+    resp = job_service.ops_fail_job(fail_id, reason="ops_fail")
+    assert resp["status"] == JobStatus.FAILED.value
+    status_data = json.loads((fail_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.FAILED.value
+    assert status_data["error"] == "ops_fail"
+
+    cancel_id = "job-ops-cancel"
+    job_service.jobs[cancel_id] = {
+        "job_id": cancel_id,
+        "target_host": "worker-a",
+        "status": JobStatus.QUEUED.value,
+    }
+    job_utils.save_job(cancel_id, job_service.jobs[cancel_id])
+    cancel_dir = Path(settings.JOBS_DIR) / cancel_id
+    cancel_dir.mkdir(parents=True, exist_ok=True)
+    job_utils.write_status_file(cancel_id, JobStatus.QUEUED.value, {})
+    job_utils.enqueue_job({
+        "job_id": cancel_id,
+        "preferred_host": "worker-a",
+        "require_host": True,
+    })
+
+    resp = job_service.ops_cancel_job(cancel_id, reason="ops_cancel")
+    assert resp["status"] == JobStatus.CANCELED.value
+    status_data = json.loads((cancel_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.CANCELED.value
+    assert status_data["error"] == "ops_cancel"
+    queue_file = Path(settings.QUEUE_DIR) / f"{cancel_id}.json"
+    assert not queue_file.exists()
+
+
+def test_ops_cleanup_queue_removes_orphans():
+    missing_id = "job-missing"
+    job_utils.enqueue_job({
+        "job_id": missing_id,
+        "preferred_host": None,
+        "require_host": False,
+    })
+    queue_file = Path(settings.QUEUE_DIR) / f"{missing_id}.json"
+    assert queue_file.exists()
+
+    resp = job_service.ops_cleanup_queue()
+    assert missing_id in resp["removed"]
+    assert not queue_file.exists()
 
 
 def test_delete_job_removes_artifacts():

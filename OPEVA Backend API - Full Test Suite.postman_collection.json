@@ -256,21 +256,9 @@
         },
         {
           "name": "List All Jobs",
-          "protocolProfileBehavior": {
-            "disableBodyPruning": true
-          },
           "request": {
             "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"config\": {\n    \"experiment\": {\n      \"name\": \"inline_postman_test\",\n      \"run_name\": \"inline-run-01\",\n      \"logging\": {\n        \"log_level\": \"INFO\",\n        \"mlflow\": true,\n        \"mlflow_uri\": \"http://mlflow:5000\"\n      }\n    },\n    \"simulator\": {\n      \"dataset_path\": \"/data/datasets/citylearn_challenge_2022_phase_all_plus_evs/schema.json\",\n      \"central_agent\": false,\n      \"reward_function\": \"RewardFunction\"\n    },\n    \"algorithm\": {\n      \"seed\": 22,\n      \"hyperparameters\": {\n        \"checkpoint_interval\": 20,\n        \"steps_between_training_updates\": 5,\n        \"target_update_interval\": 2,\n        \"end_exploration_time_step\": 200,\n        \"end_initial_exploration_time_step\": 100\n      }\n    }\n  },\n  \"save_as\": \"postman_test_inline.yaml\",\n  \"target_host\": \"local\"\n}"
-            },
+            "header": [],
             "url": "{{baseUrl}}/jobs"
           },
           "response": [],
@@ -368,7 +356,23 @@
             "header": [],
             "url": "{{baseUrl}}/stop/{{job_id}}"
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('stop response message', function () {",
+                  "  const msg = (body && body.message) ? body.message : '';",
+                  "  pm.expect(msg).to.match(/Stop requested|canceled|already/i);",
+                  "});"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Delete Job and Files",
@@ -406,6 +410,128 @@
                   "const body = pm.response.json();",
                   "pm.test('job id returned', function () { pm.expect(body).to.have.property('job_id'); });",
                   "pm.collectionVariables.set('job_id', body.job_id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ops",
+      "item": [
+        {
+          "name": "Requeue Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force\": false,\n  \"preferred_host\": null,\n  \"require_host\": null\n}"
+            },
+            "url": "{{baseUrl}}/ops/jobs/{{job_id}}/requeue"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 or 409', function () { pm.expect([200, 409]).to.include(pm.response.code); });",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('job requeued', function () { pm.expect(pm.response.json()).to.have.property('status', 'queued'); });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fail Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"ops_failed\",\n  \"force\": false\n}"
+            },
+            "url": "{{baseUrl}}/ops/jobs/{{job_id}}/fail"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 or 409', function () { pm.expect([200, 409]).to.include(pm.response.code); });",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('job failed', function () { pm.expect(pm.response.json()).to.have.property('status', 'failed'); });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"ops_canceled\",\n  \"force\": false\n}"
+            },
+            "url": "{{baseUrl}}/ops/jobs/{{job_id}}/cancel"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 or 409', function () { pm.expect([200, 409]).to.include(pm.response.code); });",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('job canceled', function () { pm.expect(pm.response.json()).to.have.property('status', 'canceled'); });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cleanup Queue",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/ops/queue/cleanup"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('response has count', function () { pm.expect(pm.response.json()).to.have.property('count'); });"
                 ]
               }
             }

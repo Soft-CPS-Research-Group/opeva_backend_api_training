@@ -7,6 +7,7 @@ enum JobStatus {
   queued
   dispatched
   running
+  stop_requested
   finished
   failed
   stopped
@@ -21,6 +22,7 @@ class Job {
   status: JobStatus
   configPath: str
   preferredHost: str?
+  requireHost: bool
   targetHost: str?
   experimentName: str
   runName: str
@@ -47,6 +49,8 @@ class JobStatusSnapshot {
   exitCode: int?
   error: str?
   details: dict?
+  stopRequested: bool?
+  statusUpdatedAt: float?
 }
 
 class JobResult {
@@ -71,6 +75,7 @@ class JobQueue {
 class JobQueueEntry {
   jobId: str
   preferredHost: str?
+  requireHost: bool
   claimedBy: str?
 }
 
@@ -88,6 +93,12 @@ class HostHeartbeat {
   workerId: str
   lastSeen: datetime
   info: dict
+}
+
+class OpsAction {
+  action: str
+  reason: str?
+  force: bool?
 }
 
 class ConfigFile {
@@ -136,6 +147,7 @@ WorkerAgent "1" --> "*" Job : executes
 WorkerAgent "1" --> "*" JobStatusSnapshot : updates
 WorkerAgent "1" --> "1" Host : runs on
 Host "1" o-- "0..*" HostHeartbeat
+OpsAction "*" --> "*" Job : overrides
 
 Dataset "1" --> "1" DatasetConfig
 Dataset "1" --> "1" MongoSite : pulls from

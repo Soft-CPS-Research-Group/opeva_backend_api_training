@@ -5,6 +5,8 @@ from app.models.job import JobLaunchRequest
 async def run_simulation(request: JobLaunchRequest):
     try:
         return await job_service.launch_simulation(request)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

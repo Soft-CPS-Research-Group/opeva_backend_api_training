@@ -19,17 +19,16 @@ _LOGGER = logging.getLogger(__name__)
 CAPACITY_COUNT_STATUSES = {
     JobStatus.DISPATCHED.value,
     JobStatus.RUNNING.value,
+    JobStatus.STOP_REQUESTED.value,
 }
 
 def _refresh_jobs():
     """Reload the job registry from disk to keep multiple workers in sync."""
-    global jobs
     try:
         disk_jobs = job_utils.load_jobs()
         if isinstance(disk_jobs, dict):
-            # Merge disk state into memory without dropping in-memory additions (useful for tests)
-            for jid, meta in disk_jobs.items():
-                jobs[jid] = meta
+            jobs.clear()
+            jobs.update(disk_jobs)
     except Exception:
         _LOGGER.warning("Failed to refresh jobs registry from disk", exc_info=True)
 
@@ -39,6 +38,14 @@ def _persist_job(job_id: str, metadata: dict):
     _LOGGER.debug("Persisting job %s (status=%s)", job_id, metadata.get("status"))
     job_utils.save_job(job_id, metadata)
     jobs[job_id] = metadata
+
+def _job_exists(job_id: str) -> bool:
+    if job_id in jobs:
+        return True
+    try:
+        return job_id in job_utils.load_jobs()
+    except Exception:
+        return False
 
 # ---------- helpers ----------
 def _slug(s: str) -> str:
@@ -84,10 +91,25 @@ def _read_status_file(job_id: str) -> Optional[str]:
         return payload.get("status")
     return None
 
+
+def _status_last_update(job_id: str) -> Optional[float]:
+    payload = _read_status_payload(job_id)
+    if payload:
+        ts = payload.get("status_updated_at")
+        if isinstance(ts, (int, float)):
+            return float(ts)
+    path = _status_path(job_id)
+    if os.path.exists(path):
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return None
+    return None
+
 def _write_status(job_id: str, status: str, extra: dict | None = None):
     """Persist status to disk and update the in-memory jobs cache."""
     prev = _read_status_file(job_id)
-    if prev and not can_transition(prev, status):
+    if prev and prev != status and not can_transition(prev, status):
         _LOGGER.error("Invalid status transition for job %s: %s -> %s", job_id, prev, status)
         raise ValueError(f"Invalid status transition {prev} -> {status}")
     _LOGGER.info(
@@ -97,13 +119,27 @@ def _write_status(job_id: str, status: str, extra: dict | None = None):
         status,
         sorted((extra or {}).keys()),
     )
-    job_utils.write_status_file(job_id, status, extra or {})
+    extra_payload = dict(extra or {})
+    extra_payload.setdefault("status_updated_at", time.time())
+    job_utils.write_status_file(job_id, status, extra_payload)
     if job_id in jobs:
         jobs[job_id]["status"] = status
-        if extra:
-            jobs[job_id].update(extra)
-        with open(settings.JOB_TRACK_FILE, "w") as f:
-            json.dump(jobs, f, indent=2)
+        if extra_payload:
+            jobs[job_id].update(extra_payload)
+        job_utils.save_job(job_id, jobs[job_id])
+
+
+def _force_status(job_id: str, status: str, extra: dict | None = None) -> None:
+    """Write status without enforcing state transitions (ops override)."""
+    extra_payload = dict(extra or {})
+    extra_payload.setdefault("status_updated_at", time.time())
+    job_utils.write_status_file(job_id, status, extra_payload)
+    meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
+    if meta:
+        meta["status"] = status
+        meta.update(extra_payload)
+        job_utils.save_job(job_id, meta)
+        jobs[job_id] = meta
 
 # ---------- API: launch ----------
 def _host_active_count(host: str) -> int:
@@ -122,6 +158,13 @@ def _preferred_host(requested: Optional[str]) -> Optional[str]:
     if not job_utils.is_valid_host(requested):
         raise HTTPException(400, f"Unknown host '{requested}'. Allowed: {settings.AVAILABLE_HOSTS}")
     return requested
+
+
+def _safe_filename(value: str) -> str:
+    cleaned = os.path.normpath(value).lstrip(os.sep)
+    if cleaned.startswith("..") or os.path.isabs(value) or os.sep in cleaned:
+        raise HTTPException(400, "Invalid file name")
+    return cleaned
 
 
 def record_host_heartbeat(worker_id: str, info: dict | None = None) -> None:
@@ -144,7 +187,9 @@ def _host_status_snapshot() -> dict[str, dict]:
         # Consider hosts with active jobs as online to avoid marking long runs offline
         if not online:
             active = any(
-                (job.get("target_host") == host) and job.get("status") in (JobStatus.RUNNING.value, JobStatus.DISPATCHED.value)
+                (job.get("target_host") == host)
+                and job.get("status")
+                in (JobStatus.RUNNING.value, JobStatus.DISPATCHED.value, JobStatus.STOP_REQUESTED.value)
                 for job in jobs.values()
             )
             if active:
@@ -165,8 +210,34 @@ def _mark_stale_jobs():
     for job_id, meta in list(jobs.items()):
         status = meta.get("status")
         host = meta.get("target_host")
-        if status not in (JobStatus.DISPATCHED.value, JobStatus.RUNNING.value):
+        if status not in (JobStatus.DISPATCHED.value, JobStatus.RUNNING.value, JobStatus.STOP_REQUESTED.value):
             continue
+
+        last_update = _status_last_update(job_id)
+        if last_update and (now - last_update) > settings.JOB_STATUS_TTL:
+            preferred = meta.get("preferred_host") or meta.get("target_host")
+            require_host = bool(meta.get("require_host", bool(preferred)))
+            if status == JobStatus.DISPATCHED.value:
+                job_utils.enqueue_job({
+                    "job_id": job_id,
+                    "preferred_host": preferred,
+                    "require_host": require_host,
+                })
+                meta["status"] = JobStatus.QUEUED.value
+                _persist_job(job_id, meta)
+                _write_status(
+                    job_id,
+                    JobStatus.QUEUED.value,
+                    {"requeued_from": host, "preferred_host": preferred, "stale_status": True},
+                )
+                _LOGGER.warning("Re-queued dispatched job %s due to stale status update", job_id)
+            else:
+                _write_status(job_id, JobStatus.FAILED.value, {"error": "stale_status", "last_host": host})
+                meta["status"] = JobStatus.FAILED.value
+                _persist_job(job_id, meta)
+                _LOGGER.warning("Marked job %s as failed due to stale status update", job_id)
+            continue
+
         if not host:
             continue
         hb = host_heartbeats.get(host)
@@ -177,22 +248,23 @@ def _mark_stale_jobs():
         if not offline:
             continue
         preferred = meta.get("preferred_host") or meta.get("target_host")
+        require_host = bool(meta.get("require_host", bool(preferred)))
         if status == JobStatus.DISPATCHED.value:
             # Put back in queue for another worker to pick up
             job_utils.enqueue_job({
                 "job_id": job_id,
-                "preferred_host": preferred if preferred != host else preferred,
-                "require_host": bool(preferred),
+                "preferred_host": preferred,
+                "require_host": require_host,
             })
             meta["status"] = JobStatus.QUEUED.value
             _persist_job(job_id, meta)
             _write_status(job_id, JobStatus.QUEUED.value, {"requeued_from": host, "preferred_host": preferred})
             _LOGGER.warning("Re-queued stale dispatched job %s from offline host %s", job_id, host)
-        elif status == JobStatus.RUNNING.value:
+        elif status in (JobStatus.RUNNING.value, JobStatus.STOP_REQUESTED.value):
             _write_status(job_id, JobStatus.FAILED.value, {"error": "worker_offline", "last_host": host})
             meta["status"] = JobStatus.FAILED.value
             _persist_job(job_id, meta)
-            _LOGGER.warning("Marked running job %s as failed because host %s is offline", job_id, host)
+            _LOGGER.warning("Marked job %s as failed because host %s is offline", job_id, host)
 
 
 async def launch_simulation(request: JobLaunchRequest):
@@ -217,6 +289,7 @@ async def launch_simulation(request: JobLaunchRequest):
         config_path = relative_path
     elif request.config:
         file_name = request.save_as or f"{job_id}.yaml"
+        file_name = _safe_filename(file_name)
         config_path = file_utils.save_config_dict(request.config, file_name)
         config = request.config
     else:
@@ -239,6 +312,7 @@ async def launch_simulation(request: JobLaunchRequest):
         "experiment_name": experiment_name,
         "run_name": run_name,
         "status": JobStatus.LAUNCHING.value,
+        "require_host": bool(preferred_host),
     }
     _persist_job(job_id, meta)
     job_utils.save_job_info(job_id, job_name, config_path, preferred_host or "",
@@ -309,40 +383,36 @@ def stop_job(job_id: str):
     if not job:
         raise HTTPException(404, "Job not found")
 
-    host = job.get("target_host") or "local"
     status_now = _read_status_file(job_id) or job.get("status", JobStatus.UNKNOWN.value)
 
-    removed = job_utils.remove_from_queue(job_id)
+    job_utils.remove_from_queue(job_id)
 
-    if status_now == JobStatus.QUEUED.value and removed:
+    if status_now in (JobStatus.LAUNCHING.value, JobStatus.QUEUED.value):
         _write_status(job_id, JobStatus.CANCELED.value)
         if job_id in jobs:
             jobs[job_id]["status"] = JobStatus.CANCELED.value
             _persist_job(job_id, jobs[job_id])
         return {"message": "Job canceled from queue"}
 
-    if host == "local":
-        _write_status(job_id, JobStatus.STOPPED.value, {"stop_requested": True})
+    if status_now in (JobStatus.DISPATCHED.value, JobStatus.RUNNING.value):
+        _write_status(job_id, JobStatus.STOP_REQUESTED.value, {"stop_requested": True})
         if job_id in jobs:
-            jobs[job_id]["status"] = JobStatus.STOPPED.value
+            jobs[job_id]["status"] = JobStatus.STOP_REQUESTED.value
             _persist_job(job_id, jobs[job_id])
-        return {"message": "Local stop recorded"}
+        return {"message": "Stop requested; worker should terminate the job"}
 
-    if status_now == JobStatus.RUNNING.value:
-        _write_status(job_id, JobStatus.STOPPED.value, {"stop_requested": True})
-        if job_id in jobs:
-            jobs[job_id]["status"] = JobStatus.STOPPED.value
-            _persist_job(job_id, jobs[job_id])
-        return {"message": "Stop requested; remote worker should terminate the job"}
+    if status_now == JobStatus.STOP_REQUESTED.value:
+        return {"message": "Stop already requested"}
 
-    if status_now == JobStatus.DISPATCHED.value:
-        _write_status(job_id, JobStatus.CANCELED.value, {"stop_requested": True})
-        if job_id in jobs:
-            jobs[job_id]["status"] = JobStatus.CANCELED.value
-            _persist_job(job_id, jobs[job_id])
-        return {"message": "Dispatch canceled"}
+    if status_now in (
+        JobStatus.FINISHED.value,
+        JobStatus.FAILED.value,
+        JobStatus.STOPPED.value,
+        JobStatus.CANCELED.value,
+    ):
+        return {"message": f"Job already finished ({status_now})"}
 
-    return {"message": f"Remote job is {status_now}; nothing to stop"}
+    return {"message": f"Job is {status_now}; nothing to stop"}
 
 def list_jobs():
     _refresh_jobs()
@@ -379,9 +449,10 @@ def delete_job(job_id: str):
     _mark_stale_jobs()
     if job_id not in jobs:
         raise HTTPException(404, "Job not found or already deleted")
-    ok = job_utils.delete_job_by_id(job_id, jobs)
+    ok = job_utils.delete_job_by_id(job_id)
     if not ok:
         raise HTTPException(500, "Failed to delete job")
+    jobs.pop(job_id, None)
     return {"message": f"Job {job_id} deleted successfully"}
 
 def get_hosts():
@@ -391,6 +462,154 @@ def get_hosts():
         "available_hosts": settings.AVAILABLE_HOSTS,
         "hosts": _host_status_snapshot(),
     }
+
+
+def ops_requeue_job(
+    job_id: str,
+    force: bool = False,
+    preferred_host: Optional[str] = None,
+    require_host: Optional[bool] = None,
+):
+    _refresh_jobs()
+    if not _job_exists(job_id):
+        raise HTTPException(404, f"Job {job_id} not found")
+    meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
+    status_now = _read_status_file(job_id) or meta.get("status", JobStatus.UNKNOWN.value)
+
+    if preferred_host:
+        if not job_utils.is_valid_host(preferred_host):
+            raise HTTPException(400, f"Unknown host '{preferred_host}'. Allowed: {settings.AVAILABLE_HOSTS}")
+    preferred = preferred_host or meta.get("preferred_host") or meta.get("target_host")
+    if require_host is None:
+        require_host = bool(meta.get("require_host", bool(preferred)))
+
+    if not force:
+        if status_now in (
+            JobStatus.FINISHED.value,
+            JobStatus.FAILED.value,
+            JobStatus.STOPPED.value,
+            JobStatus.CANCELED.value,
+        ):
+            raise HTTPException(409, f"Job already terminal ({status_now}); use force to requeue")
+        if status_now in (JobStatus.RUNNING.value, JobStatus.STOP_REQUESTED.value):
+            raise HTTPException(409, f"Job is {status_now}; use force to requeue")
+
+    prev_host = meta.get("target_host")
+    job_utils.remove_from_queue(job_id)
+    job_utils.enqueue_job({
+        "job_id": job_id,
+        "preferred_host": preferred,
+        "require_host": require_host,
+    })
+
+    meta["status"] = JobStatus.QUEUED.value
+    meta["preferred_host"] = preferred
+    meta["require_host"] = require_host
+    meta["target_host"] = preferred if require_host else None
+    _persist_job(job_id, meta)
+
+    extra = {
+        "requeued_by_ops": True,
+        "force": force,
+        "requeued_from": prev_host,
+        "preferred_host": preferred,
+    }
+    if force:
+        _force_status(job_id, JobStatus.QUEUED.value, extra)
+    else:
+        _write_status(job_id, JobStatus.QUEUED.value, extra)
+
+    return {"message": "Job requeued", "job_id": job_id, "status": JobStatus.QUEUED.value}
+
+
+def ops_fail_job(job_id: str, reason: str = "ops_failed", force: bool = False):
+    _refresh_jobs()
+    if not _job_exists(job_id):
+        raise HTTPException(404, f"Job {job_id} not found")
+    meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
+    status_now = _read_status_file(job_id) or meta.get("status", JobStatus.UNKNOWN.value)
+
+    if not force:
+        if status_now in (
+            JobStatus.FINISHED.value,
+            JobStatus.FAILED.value,
+            JobStatus.STOPPED.value,
+            JobStatus.CANCELED.value,
+        ):
+            raise HTTPException(409, f"Job already terminal ({status_now})")
+        if status_now in (JobStatus.QUEUED.value, JobStatus.LAUNCHING.value):
+            raise HTTPException(409, f"Job is {status_now}; use cancel or force to fail")
+
+    job_utils.remove_from_queue(job_id)
+    meta["status"] = JobStatus.FAILED.value
+    meta["error"] = reason
+    _persist_job(job_id, meta)
+
+    extra = {"error": reason, "failed_by_ops": True, "force": force}
+    if force:
+        _force_status(job_id, JobStatus.FAILED.value, extra)
+    else:
+        _write_status(job_id, JobStatus.FAILED.value, extra)
+
+    return {"message": "Job failed", "job_id": job_id, "status": JobStatus.FAILED.value}
+
+
+def ops_cancel_job(job_id: str, reason: str = "ops_canceled", force: bool = False):
+    _refresh_jobs()
+    if not _job_exists(job_id):
+        raise HTTPException(404, f"Job {job_id} not found")
+    meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
+    status_now = _read_status_file(job_id) or meta.get("status", JobStatus.UNKNOWN.value)
+
+    if not force and status_now in (
+        JobStatus.FINISHED.value,
+        JobStatus.FAILED.value,
+        JobStatus.STOPPED.value,
+        JobStatus.CANCELED.value,
+    ):
+        raise HTTPException(409, f"Job already terminal ({status_now})")
+
+    job_utils.remove_from_queue(job_id)
+    meta["status"] = JobStatus.CANCELED.value
+    meta["error"] = reason
+    _persist_job(job_id, meta)
+
+    extra = {"error": reason, "canceled_by_ops": True, "force": force}
+    if force:
+        _force_status(job_id, JobStatus.CANCELED.value, extra)
+    else:
+        _write_status(job_id, JobStatus.CANCELED.value, extra)
+
+    return {"message": "Job canceled", "job_id": job_id, "status": JobStatus.CANCELED.value}
+
+
+def ops_cleanup_queue() -> dict:
+    _refresh_jobs()
+    removed: list[str] = []
+    wdir = settings.QUEUE_DIR
+    if not os.path.isdir(wdir):
+        return {"removed": removed, "count": 0}
+    for fname in os.listdir(wdir):
+        if not fname.endswith(".json"):
+            continue
+        path = os.path.join(wdir, fname)
+        try:
+            with open(path) as f:
+                payload = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        job_id = payload.get("job_id") or fname.rsplit(".", 1)[0]
+        meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
+        status_now = _read_status_file(job_id) or meta.get("status")
+        if not meta or status_now not in (JobStatus.QUEUED.value, JobStatus.LAUNCHING.value):
+            try:
+                os.remove(path)
+                removed.append(job_id)
+            except OSError:
+                continue
+    return {"removed": removed, "count": len(removed)}
 
 # ---------- hooks used by agent endpoints ----------
 def agent_next_job(worker_id: str):
@@ -405,7 +624,13 @@ def agent_next_job(worker_id: str):
 
     meta = jobs.get(job_id)
     if not meta:
-        meta = job_utils.load_jobs().get(job_id, {})
+        _LOGGER.warning("Queue entry for unknown job %s; skipping dispatch", job_id)
+        return None
+
+    status_now = _read_status_file(job_id) or meta.get("status")
+    if status_now not in (JobStatus.QUEUED.value, JobStatus.LAUNCHING.value):
+        _LOGGER.warning("Skipping job %s with status %s (queue entry likely stale)", job_id, status_now)
+        return None
 
     config_path = meta.get("config_path")
     job_name = meta.get("job_name", job_id)
@@ -418,7 +643,9 @@ def agent_next_job(worker_id: str):
             config_path = info_data.get("config_path")
             job_name = info_data.get("job_name", job_name)
         if not config_path:
-            raise HTTPException(500, f"Missing config path for job {job_id}")
+            _write_status(job_id, JobStatus.FAILED.value, {"error": "missing_config"})
+            _LOGGER.error("Missing config path for job %s; marked failed", job_id)
+            return None
 
     container_name = _container_name(job_id, job_name)
     command = f"--config /data/{config_path} --job_id {job_id}"
@@ -472,13 +699,25 @@ def agent_update_status(job_id: str, status: str, extra: dict | None = None):
     _refresh_jobs()
     _mark_stale_jobs()
     extra = extra or {}
+    if not _job_exists(job_id):
+        raise HTTPException(404, f"Job {job_id} not found")
+    try:
+        JobStatus(status)
+    except ValueError:
+        raise HTTPException(400, f"Unknown status '{status}'")
     _LOGGER.info(
         "Agent reported status for job %s: %s (extra keys=%s)",
         job_id,
         status,
         sorted(extra.keys()),
     )
-    _write_status(job_id, status, extra)
+    try:
+        _write_status(job_id, status, extra)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+    if status != JobStatus.QUEUED.value:
+        job_utils.remove_from_queue(job_id)
 
     worker = extra.get("worker_id")
     if worker:

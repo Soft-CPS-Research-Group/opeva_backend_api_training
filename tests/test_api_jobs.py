@@ -224,3 +224,67 @@ def test_agent_job_status_updates_exit_code(api_client, monkeypatch):
     status_resp = api_client.get(f"/status/{job_id}").json()
     assert status_resp["status"] == JobStatus.FINISHED.value
     assert status_resp["exit_code"] == 0
+
+
+def test_stop_job_marks_stop_requested(api_client, monkeypatch):
+    from app.config import settings
+    from app.services import job_service
+    from app.status import JobStatus
+
+    monkeypatch.setattr(settings, "AVAILABLE_HOSTS", ["worker-a"])
+
+    payload = {"experiment": {"name": "Stop", "run_name": "Request"}}
+    response = api_client.post(
+        "/run-simulation",
+        json={"config": payload, "target_host": "worker-a"},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    dispatched = job_service.agent_next_job("worker-a")
+    assert dispatched is not None
+
+    resp = api_client.post(
+        "/api/agent/job-status",
+        json={
+            "job_id": job_id,
+            "status": JobStatus.RUNNING.value,
+            "worker_id": "worker-a",
+            "container_id": "cid-2",
+            "container_name": "cont-2",
+        },
+    )
+    assert resp.status_code == 200
+
+    stop_resp = api_client.post(f"/stop/{job_id}")
+    assert stop_resp.status_code == 200
+    assert "Stop requested" in stop_resp.json()["message"]
+
+    status_resp = api_client.get(f"/status/{job_id}").json()
+    assert status_resp["status"] == JobStatus.STOP_REQUESTED.value
+
+
+def test_ops_requeue_endpoint(api_client, monkeypatch):
+    from app.config import settings
+    from app.services import job_service
+    from app.status import JobStatus
+
+    monkeypatch.setattr(settings, "AVAILABLE_HOSTS", ["worker-a"])
+
+    payload = {"experiment": {"name": "Ops", "run_name": "Requeue"}}
+    response = api_client.post(
+        "/run-simulation",
+        json={"config": payload, "target_host": "worker-a"},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    dispatched = job_service.agent_next_job("worker-a")
+    assert dispatched is not None
+    status_resp = api_client.get(f"/status/{job_id}").json()
+    assert status_resp["status"] == JobStatus.DISPATCHED.value
+
+    resp = api_client.post(f"/ops/jobs/{job_id}/requeue")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == JobStatus.QUEUED.value

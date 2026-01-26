@@ -13,7 +13,8 @@ class JobStatus(str, Enum):
     # terminal
     FINISHED = "finished"        # exit code 0
     FAILED = "failed"            # non-zero exit code
-    STOPPED = "stopped"          # intentionally stopped/cancelled
+    STOP_REQUESTED = "stop_requested"  # stop requested by API; waiting on worker
+    STOPPED = "stopped"          # intentionally stopped by worker
 
     # utility
     NOT_FOUND = "not_found"      # container/file missing
@@ -25,8 +26,9 @@ class JobStatus(str, Enum):
 ALLOWED_TRANSITIONS = {
     JobStatus.LAUNCHING: {JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.CANCELED},
     JobStatus.QUEUED: {JobStatus.DISPATCHED, JobStatus.CANCELED},
-    JobStatus.DISPATCHED: {JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELED},
-    JobStatus.RUNNING: {JobStatus.FINISHED, JobStatus.FAILED, JobStatus.STOPPED, JobStatus.CANCELED},
+    JobStatus.DISPATCHED: {JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELED, JobStatus.STOP_REQUESTED, JobStatus.QUEUED},
+    JobStatus.RUNNING: {JobStatus.FINISHED, JobStatus.FAILED, JobStatus.STOP_REQUESTED, JobStatus.STOPPED, JobStatus.CANCELED},
+    JobStatus.STOP_REQUESTED: {JobStatus.STOPPED, JobStatus.FAILED, JobStatus.CANCELED},
     JobStatus.FINISHED: set(),
     JobStatus.FAILED: set(),
     JobStatus.STOPPED: set(),

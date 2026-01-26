@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     DEFAULT_JOB_IMAGE: str = "calof/opeva_simulator:latest"
     CONTAINER_NAME_PREFIX: str = "opeva_job"
     WORKER_STALE_GRACE_SECONDS: int = 120  # additional grace beyond heartbeat TTL
+    JOB_STATUS_TTL: int = 300  # seconds before a job status is considered stale
 
     def mongo_uri(self, db_name: str) -> str:
         return (

@@ -22,6 +22,8 @@ def job_status(req: StatusRequest):
         status = payload.pop("status")
         _LOGGER.info("Processing status update from %s: job %s -> %s", req.worker_id, job_id, status)
         return job_service.agent_update_status(job_id, status, payload)
+    except HTTPException:
+        raise
     except Exception as e:
         _LOGGER.exception("Failed to process status update for job %s", getattr(req, "job_id", "unknown"))
         raise HTTPException(status_code=500, detail=str(e))

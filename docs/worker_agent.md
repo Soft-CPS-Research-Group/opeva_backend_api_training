@@ -1,7 +1,8 @@
 # Worker Agent Integration Guide
 
 This document summarises the contract between the backend API and any worker
-agent implementation.
+agent implementation. The full job lifecycle, payload schema, and ops controls
+are documented in `docs/jobs.md`.
 
 ## Queue Semantics
 - The API stores every launch request as a JSON file in the global
@@ -24,12 +25,14 @@ agent implementation.
 ## Lifecycle Hooks
 - **Start:** POST `/api/agent/job-status` with `status="running"` (include
   `worker_id`, `container_id`, `container_name`).
+- **Progress heartbeat:** while running, POST periodic `status="running"`
+  updates to refresh `status_updated_at` and avoid stale-job handling.
 - **Completion:** POST `/api/agent/job-status` with
   `status="finished"` or `"failed"` plus `worker_id` and optional
   container metadata.
-- **Cancellation:** If a job is cancelled while queued, the API removes the
-  queue file and updates `status.json` to `canceled`. Running jobs should be
-  stopped cooperatively by the agent when future support exists.
+- **Stop requested:** if the API sets `status="stop_requested"`, the worker
+  must terminate the container and respond with `status="stopped"`.
+- **Cancellation:** queued jobs can be cancelled by the API (`canceled`).
 
 ## Heartbeats
 - Agents must send a heartbeat at least every
