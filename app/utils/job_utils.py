@@ -1,5 +1,5 @@
 # app/utils/job_utils.py
-import os, json, shutil
+import os, json, shutil, time
 from app.config import settings
 
 def ensure_directories():
@@ -77,14 +77,39 @@ def enqueue_job(payload: dict):
     entry = {
         "job_id": payload["job_id"],
         "preferred_host": payload.get("preferred_host"),
+        "require_host": payload.get("require_host", bool(payload.get("preferred_host"))),
     }
     with open(path, "w") as f:
         json.dump(entry, f, indent=2)
+
+def _restore_stale_claims(ttl: int):
+    """Return stale claim files back to the queue if they have exceeded the TTL."""
+    wdir = settings.QUEUE_DIR
+    if not os.path.isdir(wdir):
+        return
+    now = time.time()
+    for fname in os.listdir(wdir):
+        if ".claim." not in fname:
+            continue
+        path = os.path.join(wdir, fname)
+        try:
+            if (now - os.path.getmtime(path)) < ttl:
+                continue
+            original = path.rsplit(".claim.", 1)[0]
+            os.replace(path, original)
+        except Exception:
+            # Best-effort; leave the claim in place if anything goes wrong
+            continue
+
 
 def agent_pop_next_job(worker_id: str) -> dict | None:
     wdir = settings.QUEUE_DIR
     if not os.path.isdir(wdir):
         return None
+
+    # Return stale claims to the queue so jobs don't get stuck if a worker dies mid-claim
+    _restore_stale_claims(settings.QUEUE_CLAIM_TTL)
+
     files = sorted(
         [os.path.join(wdir, f) for f in os.listdir(wdir) if f.endswith(".json")],
         key=lambda p: os.path.getmtime(p)
@@ -101,10 +126,17 @@ def agent_pop_next_job(worker_id: str) -> dict | None:
         try:
             with open(claim_path) as f:
                 payload = json.load(f)
+
             preferred = payload.get("preferred_host")
-            if preferred and preferred != worker_id:
+            require_host = payload.get("require_host", bool(preferred))
+            if preferred and preferred != worker_id and require_host:
                 os.replace(claim_path, path)
                 continue
+
+            # Allow any worker to pick up the job when host is not required
+            if preferred and preferred != worker_id and not require_host:
+                payload["preferred_host"] = preferred
+
             os.remove(claim_path)
             return payload
         except Exception:

@@ -109,3 +109,4 @@ def test_launch_remote_updates_cache(monkeypatch, tmp_path):
     assert job_service.jobs[job_id]["status"] == JobStatus.QUEUED.value
     assert queued and queued[0]["preferred_host"] == "remote1"
     assert queued[0]["job_id"] == job_id
+    assert queued[0]["require_host"] is True

@@ -13,9 +13,11 @@ class Settings(BaseSettings):
     JOBS_DIR: str      = os.path.join(VM_SHARED_DATA, "jobs")
     DATASETS_DIR: str  = os.path.join(VM_SHARED_DATA, "datasets")
     QUEUE_DIR: str     = os.path.join(VM_SHARED_DATA, "queue")  # for worker-agent jobs
+    QUEUE_CLAIM_TTL: int = 300  # seconds before a claimed queue file is re-queued
 
     # ── Hosts: simple names. "local" runs on server; others go to that worker's agent ─
-    AVAILABLE_HOSTS: list[str] = ["server", "gpu-server-1", "gpu-server-2", "tiago-laptop"]
+    AVAILABLE_HOSTS: list[str] = ["local", "server", "gpu-server-1", "gpu-server-2", "tiago-laptop"]
+    HOST_HEARTBEAT_TTL: int = 60  # seconds
 
     # ── Mongo (unchanged from your setup) ───────────────────────────────────────
     MONGO_USER: str = "runtimeUI"
@@ -67,6 +69,11 @@ class Settings(BaseSettings):
         "energy_price_predicted_2": "",
         "energy_price_predicted_3": ""
     }
+
+    # ── Job/agent defaults ──────────────────────────────────────────────────────
+    DEFAULT_JOB_IMAGE: str = "calof/opeva_simulator:latest"
+    CONTAINER_NAME_PREFIX: str = "opeva_job"
+    WORKER_STALE_GRACE_SECONDS: int = 120  # additional grace beyond heartbeat TTL
 
     def mongo_uri(self, db_name: str) -> str:
         return (

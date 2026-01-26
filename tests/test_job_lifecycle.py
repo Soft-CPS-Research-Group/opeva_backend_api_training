@@ -93,6 +93,7 @@ def test_launch_remote_persists_and_queues(monkeypatch):
     queued_payload = json.loads(queued_file.read_text())
     assert queued_payload["job_id"] == job_id
     assert queued_payload["preferred_host"] == "remote1"
+    assert queued_payload["require_host"] is True
 
     track = json.loads(Path(settings.JOB_TRACK_FILE).read_text())
     assert track[job_id]["status"] == JobStatus.QUEUED.value
@@ -267,6 +268,8 @@ def test_agent_skips_jobs_for_other_hosts(monkeypatch):
     assert dispatched is not None
     assert dispatched["job_id"] == job_id
     assert not queue_file.exists()
+    assert dispatched["image"] == settings.DEFAULT_JOB_IMAGE
+    assert "--job_id" in dispatched["command"]
 
 
 def test_agent_flow_updates_status_and_info():
@@ -357,7 +360,9 @@ def test_list_queue_returns_entries(tmp_path, jobs_env):
     job_utils.enqueue_job(payload)
 
     entries = job_service.list_queue()
-    assert entries == [payload]
+    expected = dict(payload)
+    expected["require_host"] = True
+    assert entries == [expected]
 
 
 def test_host_heartbeat_reporting(monkeypatch):

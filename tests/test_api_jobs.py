@@ -111,7 +111,7 @@ def test_run_simulation_remote_accepts_prefixed_path(api_client, monkeypatch):
     data = response.json()
     assert data["status"] == JobStatus.QUEUED.value
     assert data["host"] == "remote1"
-    assert captured["payload"] == {"job_id": data["job_id"], "preferred_host": "remote1"}
+    assert captured["payload"] == {"job_id": data["job_id"], "preferred_host": "remote1", "require_host": True}
 
     job_id = data["job_id"]
     jobs_resp = api_client.get("/jobs").json()

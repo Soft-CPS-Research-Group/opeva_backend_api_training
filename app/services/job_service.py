@@ -11,9 +11,8 @@ from app.status import JobStatus, can_transition
 
 # In-memory cache of tracked jobs for fast access and testability
 jobs = job_utils.load_jobs()
-
-HEARTBEAT_TTL = int(os.environ.get("HOST_HEARTBEAT_TTL", "60"))
 host_heartbeats: dict[str, dict] = {}
+HEARTBEAT_TTL = settings.HOST_HEARTBEAT_TTL  # backward compatibility for tests
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,6 +20,18 @@ CAPACITY_COUNT_STATUSES = {
     JobStatus.DISPATCHED.value,
     JobStatus.RUNNING.value,
 }
+
+def _refresh_jobs():
+    """Reload the job registry from disk to keep multiple workers in sync."""
+    global jobs
+    try:
+        disk_jobs = job_utils.load_jobs()
+        if isinstance(disk_jobs, dict):
+            # Merge disk state into memory without dropping in-memory additions (useful for tests)
+            for jid, meta in disk_jobs.items():
+                jobs[jid] = meta
+    except Exception:
+        _LOGGER.warning("Failed to refresh jobs registry from disk", exc_info=True)
 
 
 def _persist_job(job_id: str, metadata: dict):
@@ -47,6 +58,10 @@ def _log_dir(job_id: str) -> str:
 
 def _log_path(job_id: str) -> str:
     return os.path.join(_log_dir(job_id), f"{job_id}.log")
+
+def _container_name(job_id: str, job_name: str) -> str:
+    safe_name = _slug(job_name)[:40]
+    return f"{settings.CONTAINER_NAME_PREFIX}_{safe_name}_{job_id[:8]}"
 
 def _read_status_payload(job_id: str) -> Optional[dict]:
     path = _status_path(job_id)
@@ -125,7 +140,15 @@ def _host_status_snapshot() -> dict[str, dict]:
     snapshot: dict[str, dict] = {}
     for host in sorted(known_hosts):
         hb = host_heartbeats.get(host)
-        online = bool(hb and (now - hb["last_seen"]) <= HEARTBEAT_TTL)
+        online = bool(hb and (now - hb["last_seen"]) <= settings.HOST_HEARTBEAT_TTL)
+        # Consider hosts with active jobs as online to avoid marking long runs offline
+        if not online:
+            active = any(
+                (job.get("target_host") == host) and job.get("status") in (JobStatus.RUNNING.value, JobStatus.DISPATCHED.value)
+                for job in jobs.values()
+            )
+            if active:
+                online = True
         snapshot[host] = {
             "online": online,
             "last_seen": hb["last_seen"] if hb else None,
@@ -133,6 +156,43 @@ def _host_status_snapshot() -> dict[str, dict]:
             "running": _host_active_count(host),
         }
     return snapshot
+
+
+def _mark_stale_jobs():
+    """Detect jobs stuck on offline workers and requeue or fail them."""
+    now = time.time()
+    cutoff = settings.HOST_HEARTBEAT_TTL + settings.WORKER_STALE_GRACE_SECONDS
+    for job_id, meta in list(jobs.items()):
+        status = meta.get("status")
+        host = meta.get("target_host")
+        if status not in (JobStatus.DISPATCHED.value, JobStatus.RUNNING.value):
+            continue
+        if not host:
+            continue
+        hb = host_heartbeats.get(host)
+        last_seen = hb["last_seen"] if hb else None
+        if last_seen is None:
+            continue  # no heartbeat recorded yet; give it a chance
+        offline = (now - last_seen) > cutoff
+        if not offline:
+            continue
+        preferred = meta.get("preferred_host") or meta.get("target_host")
+        if status == JobStatus.DISPATCHED.value:
+            # Put back in queue for another worker to pick up
+            job_utils.enqueue_job({
+                "job_id": job_id,
+                "preferred_host": preferred if preferred != host else preferred,
+                "require_host": bool(preferred),
+            })
+            meta["status"] = JobStatus.QUEUED.value
+            _persist_job(job_id, meta)
+            _write_status(job_id, JobStatus.QUEUED.value, {"requeued_from": host, "preferred_host": preferred})
+            _LOGGER.warning("Re-queued stale dispatched job %s from offline host %s", job_id, host)
+        elif status == JobStatus.RUNNING.value:
+            _write_status(job_id, JobStatus.FAILED.value, {"error": "worker_offline", "last_host": host})
+            meta["status"] = JobStatus.FAILED.value
+            _persist_job(job_id, meta)
+            _LOGGER.warning("Marked running job %s as failed because host %s is offline", job_id, host)
 
 
 async def launch_simulation(request: JobLaunchRequest):
@@ -175,6 +235,7 @@ async def launch_simulation(request: JobLaunchRequest):
         "job_name": job_name,
         "config_path": config_path,
         "target_host": preferred_host,
+        "preferred_host": preferred_host,
         "experiment_name": experiment_name,
         "run_name": run_name,
         "status": JobStatus.LAUNCHING.value,
@@ -188,6 +249,7 @@ async def launch_simulation(request: JobLaunchRequest):
     job_utils.enqueue_job({
         "job_id": job_id,
         "preferred_host": preferred_host,
+        "require_host": bool(preferred_host),
     })
     meta.update({"status": JobStatus.QUEUED.value})
     _persist_job(job_id, meta)
@@ -198,6 +260,7 @@ async def launch_simulation(request: JobLaunchRequest):
 
 def get_status(job_id: str):
     """Return the current status payload for a given job."""
+    _refresh_jobs()
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
@@ -241,6 +304,7 @@ def get_logs(job_id: str):
 
 # ---------- API: stop/list/info/delete/hosts ----------
 def stop_job(job_id: str):
+    _refresh_jobs()
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
@@ -258,17 +322,31 @@ def stop_job(job_id: str):
         return {"message": "Job canceled from queue"}
 
     if host == "local":
-        _write_status(job_id, JobStatus.STOPPED.value)
+        _write_status(job_id, JobStatus.STOPPED.value, {"stop_requested": True})
         if job_id in jobs:
             jobs[job_id]["status"] = JobStatus.STOPPED.value
             _persist_job(job_id, jobs[job_id])
         return {"message": "Local stop recorded"}
 
     if status_now == JobStatus.RUNNING.value:
-        return {"message": "Remote stop requires agent support; not implemented"}
+        _write_status(job_id, JobStatus.STOPPED.value, {"stop_requested": True})
+        if job_id in jobs:
+            jobs[job_id]["status"] = JobStatus.STOPPED.value
+            _persist_job(job_id, jobs[job_id])
+        return {"message": "Stop requested; remote worker should terminate the job"}
+
+    if status_now == JobStatus.DISPATCHED.value:
+        _write_status(job_id, JobStatus.CANCELED.value, {"stop_requested": True})
+        if job_id in jobs:
+            jobs[job_id]["status"] = JobStatus.CANCELED.value
+            _persist_job(job_id, jobs[job_id])
+        return {"message": "Dispatch canceled"}
+
     return {"message": f"Remote job is {status_now}; nothing to stop"}
 
 def list_jobs():
+    _refresh_jobs()
+    _mark_stale_jobs()
     result = []
     for job_id, job in jobs.items():
         info = {}
@@ -284,9 +362,12 @@ def list_jobs():
 
 
 def list_queue():
+    _mark_stale_jobs()
     return job_utils.list_queue()
 
 def get_job_info(job_id: str):
+    _refresh_jobs()
+    _mark_stale_jobs()
     p = _info_path(job_id)
     if not os.path.exists(p):
         raise HTTPException(404, "Job info not found")
@@ -294,6 +375,8 @@ def get_job_info(job_id: str):
         return json.load(f)
 
 def delete_job(job_id: str):
+    _refresh_jobs()
+    _mark_stale_jobs()
     if job_id not in jobs:
         raise HTTPException(404, "Job not found or already deleted")
     ok = job_utils.delete_job_by_id(job_id, jobs)
@@ -302,6 +385,8 @@ def delete_job(job_id: str):
     return {"message": f"Job {job_id} deleted successfully"}
 
 def get_hosts():
+    _refresh_jobs()
+    _mark_stale_jobs()
     return {
         "available_hosts": settings.AVAILABLE_HOSTS,
         "hosts": _host_status_snapshot(),
@@ -309,6 +394,8 @@ def get_hosts():
 
 # ---------- hooks used by agent endpoints ----------
 def agent_next_job(worker_id: str):
+    _refresh_jobs()
+    _mark_stale_jobs()
     job_queue_entry = job_utils.agent_pop_next_job(worker_id)
     if not job_queue_entry:
         _LOGGER.debug("Worker %s polled queue but no job was available", worker_id)
@@ -333,11 +420,23 @@ def agent_next_job(worker_id: str):
         if not config_path:
             raise HTTPException(500, f"Missing config path for job {job_id}")
 
+    container_name = _container_name(job_id, job_name)
+    command = f"--config /data/{config_path} --job_id {job_id}"
+
     response = {
         "job_id": job_id,
         "job_name": job_name,
         "config_path": config_path,
         "preferred_host": job_queue_entry.get("preferred_host"),
+        "image": settings.DEFAULT_JOB_IMAGE,
+        "command": command,
+        "container_name": container_name,
+        "volumes": [{
+            "host": settings.VM_SHARED_DATA,
+            "container": "/data",
+            "mode": "rw",
+        }],
+        "env": {},
     }
 
     _LOGGER.info(
@@ -370,6 +469,8 @@ def agent_next_job(worker_id: str):
     return response
 
 def agent_update_status(job_id: str, status: str, extra: dict | None = None):
+    _refresh_jobs()
+    _mark_stale_jobs()
     extra = extra or {}
     _LOGGER.info(
         "Agent reported status for job %s: %s (extra keys=%s)",
@@ -380,6 +481,13 @@ def agent_update_status(job_id: str, status: str, extra: dict | None = None):
     _write_status(job_id, status, extra)
 
     worker = extra.get("worker_id")
+    if worker:
+        try:
+            record_host_heartbeat(worker, extra.get("details"))
+        except HTTPException:
+            # If the worker is unknown, don't block status updates
+            _LOGGER.warning("Ignoring heartbeat from unknown worker %s", worker)
+
     if worker and job_id in jobs:
         meta = jobs[job_id]
         if meta.get("target_host") != worker:
