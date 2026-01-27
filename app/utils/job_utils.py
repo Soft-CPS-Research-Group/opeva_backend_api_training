@@ -122,6 +122,20 @@ def delete_job_by_id(job_id: str) -> bool:
         _write_job_track_unlocked(jobs)
     return True
 
+
+def prune_jobs(keep: set[str]) -> list[str]:
+    """Remove all job records from the registry except those in keep."""
+    removed: list[str] = []
+    with _job_track_lock():
+        jobs = _read_job_track_unlocked()
+        for job_id in list(jobs.keys()):
+            if job_id in keep:
+                continue
+            removed.append(job_id)
+            jobs.pop(job_id, None)
+        _write_job_track_unlocked(jobs)
+    return removed
+
 def get_job_log_path(job_id: str):
     return os.path.join(settings.JOBS_DIR, job_id, "logs", f"{job_id}.log")
 

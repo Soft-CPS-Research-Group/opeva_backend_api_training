@@ -520,8 +520,47 @@
           "name": "Cleanup Queue",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force\": true\n}"
+            },
             "url": "{{baseUrl}}/ops/queue/cleanup"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('response has count', function () { pm.expect(pm.response.json()).to.have.property('count'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cleanup Jobs Registry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"keep\": [\n    \"sample_job\",\n    \"running_job\",\n    \"failed_job\",\n    \"queued_job\"\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/ops/jobs/cleanup"
           },
           "response": [],
           "event": [

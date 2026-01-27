@@ -22,6 +22,13 @@ CAPACITY_COUNT_STATUSES = {
     JobStatus.STOP_REQUESTED.value,
 }
 
+DEFAULT_JOB_CLEANUP_KEEP = {
+    "sample_job",
+    "running_job",
+    "failed_job",
+    "queued_job",
+}
+
 def _refresh_jobs():
     """Reload the job registry from disk to keep multiple workers in sync."""
     try:
@@ -583,12 +590,31 @@ def ops_cancel_job(job_id: str, reason: str = "ops_canceled", force: bool = Fals
     return {"message": "Job canceled", "job_id": job_id, "status": JobStatus.CANCELED.value}
 
 
-def ops_cleanup_queue() -> dict:
+def ops_cleanup_queue(force: bool = False) -> dict:
     _refresh_jobs()
     removed: list[str] = []
     wdir = settings.QUEUE_DIR
     if not os.path.isdir(wdir):
         return {"removed": removed, "count": 0}
+    if force:
+        removed_set: set[str] = set()
+        for fname in os.listdir(wdir):
+            path = os.path.join(wdir, fname)
+            if not os.path.isfile(path):
+                continue
+            if fname.endswith(".json"):
+                job_id = fname[:-5]
+            elif ".json.claim." in fname:
+                job_id = fname.split(".json.claim.", 1)[0]
+            else:
+                job_id = fname
+            try:
+                os.remove(path)
+                removed_set.add(job_id)
+            except OSError:
+                continue
+        removed = sorted(removed_set)
+        return {"removed": removed, "count": len(removed)}
     for fname in os.listdir(wdir):
         if not fname.endswith(".json"):
             continue
@@ -610,6 +636,26 @@ def ops_cleanup_queue() -> dict:
             except OSError:
                 continue
     return {"removed": removed, "count": len(removed)}
+
+
+def ops_cleanup_jobs(keep: list[str] | None = None) -> dict:
+    """Remove all job records except those in the keep list."""
+    _refresh_jobs()
+    keep_set = set(DEFAULT_JOB_CLEANUP_KEEP)
+    if keep:
+        keep_set.update(keep)
+
+    tracked = job_utils.load_jobs()
+    removed = [job_id for job_id in tracked.keys() if job_id not in keep_set]
+    if removed:
+        job_utils.prune_jobs(keep_set)
+
+    for job_id in removed:
+        job_utils.remove_from_queue(job_id)
+
+    _refresh_jobs()
+    kept = [job_id for job_id in jobs.keys() if job_id in keep_set]
+    return {"removed": removed, "kept": kept, "count": len(removed)}
 
 # ---------- hooks used by agent endpoints ----------
 def agent_next_job(worker_id: str):

@@ -684,6 +684,54 @@ def test_ops_cleanup_queue_removes_orphans():
     assert not queue_file.exists()
 
 
+def test_ops_cleanup_queue_force_removes_all():
+    job_id = "job-queued"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "status": JobStatus.QUEUED.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_utils.enqueue_job({
+        "job_id": job_id,
+        "preferred_host": None,
+        "require_host": False,
+    })
+    claim_path = Path(settings.QUEUE_DIR) / f"{job_id}.json.claim.worker-a"
+    claim_path.write_text(json.dumps({"job_id": job_id}))
+
+    resp = job_service.ops_cleanup_queue(force=True)
+    assert job_id in resp["removed"]
+    assert not any(Path(settings.QUEUE_DIR).iterdir())
+
+
+def test_ops_cleanup_jobs_prunes_registry():
+    keep_id = "keep-job"
+    remove_id = "remove-job"
+    for job_id in (keep_id, remove_id, "sample_job"):
+        job_service.jobs[job_id] = {
+            "job_id": job_id,
+            "target_host": "worker-a",
+            "status": JobStatus.QUEUED.value,
+        }
+        job_utils.save_job(job_id, job_service.jobs[job_id])
+
+    job_utils.enqueue_job({
+        "job_id": remove_id,
+        "preferred_host": None,
+        "require_host": False,
+    })
+
+    resp = job_service.ops_cleanup_jobs(keep=[keep_id])
+    assert remove_id in resp["removed"]
+    track = json.loads(Path(settings.JOB_TRACK_FILE).read_text())
+    assert keep_id in track
+    assert "sample_job" in track
+    assert remove_id not in track
+    assert remove_id not in job_service.jobs
+    assert not (Path(settings.QUEUE_DIR) / f"{remove_id}.json").exists()
+
+
 def test_delete_job_removes_artifacts():
     job_id = "job-delete"
     job_service.jobs[job_id] = {

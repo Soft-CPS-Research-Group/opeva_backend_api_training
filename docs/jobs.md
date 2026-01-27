@@ -133,7 +133,8 @@ Repeated updates with the same status are accepted (idempotent).
 - `POST /ops/jobs/{job_id}/requeue` (force optional)
 - `POST /ops/jobs/{job_id}/fail` (force optional)
 - `POST /ops/jobs/{job_id}/cancel` (force optional)
-- `POST /ops/queue/cleanup`
+- `POST /ops/queue/cleanup` (body: `{ "force": true }` to clear all queue files)
+- `POST /ops/jobs/cleanup` (body: `{ "keep": ["job_id_a", "job_id_b"] }`)
 
 Ops controls are for operators; they can override normal transitions if
 `force=true`.
