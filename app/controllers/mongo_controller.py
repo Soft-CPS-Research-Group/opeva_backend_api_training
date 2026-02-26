@@ -1,8 +1,21 @@
-from app.services import mongo_service
 from typing import Optional
 
-async def get_available_sites():
-    return {"sites": mongo_service.get_all_sites()}
+from app.services import mongo_service
 
-async def get_site_data(site_name: str, minutes: Optional[int] = None):
-    return mongo_service.get_all_collections(site_name, minutes)
+
+async def get_energy_communities():
+    return {"energy_communities": mongo_service.list_energy_communities()}
+
+
+async def get_historical_data(
+    energy_community: str,
+    minutes: Optional[int] = None,
+    from_ts: Optional[str] = None,
+    until_ts: Optional[str] = None,
+):
+    return mongo_service.get_historical_data(
+        energy_community=energy_community,
+        minutes=minutes,
+        from_ts=from_ts,
+        until_ts=until_ts,
+    )

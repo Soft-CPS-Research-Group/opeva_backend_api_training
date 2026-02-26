@@ -641,41 +641,56 @@
       "name": "mongo",
       "item": [
         {
-          "name": "Sites",
+          "name": "Energy Communities",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/sites"
+            "url": "{{baseUrl}}/energy-communities"
           },
           "response": []
         },
         {
-          "name": "Get Data",
+          "name": "Historical Data - Last 60 Minutes",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/real-time-data/i-charging_headquarters"
+            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?minutes=60"
           },
           "response": []
         },
         {
-          "name": "Get X Last Minutes of Data",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  ""
-                ],
-                "type": "text/javascript",
-                "packages": {}
-              }
-            }
-          ],
+          "name": "Historical Data - Range (X to Y)",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/real-time-data/i-charging_headquarters?minutes=600"
+            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?from_ts=2025-05-27T00:00:00%2B00:00&until_ts=2025-05-27T18:00:00%2B00:00"
+          },
+          "response": []
+        },
+        {
+          "name": "Historical Data - Validation Error (Missing Time Filter)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/historical-data/i-charging_headquarters"
+          },
+          "response": []
+        },
+        {
+          "name": "Historical Data - Validation Error (Mixed Filters)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?minutes=60&from_ts=2025-05-27T00:00:00%2B00:00&until_ts=2025-05-27T18:00:00%2B00:00"
+          },
+          "response": []
+        },
+        {
+          "name": "Historical Data - Not Found Community (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/historical-data/non_existing_community?minutes=60"
           },
           "response": []
         }
