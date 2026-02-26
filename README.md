@@ -477,14 +477,18 @@ Datasets are stored under `/opt/opeva_shared_data/datasets/<name>/` with accompa
 
 ## MongoDB Utilities
 - `GET /energy-communities` – list MongoDB databases (energy communities) the backend can access.
-- `GET /historical-data/{energy_community}?minutes=60` – fetch historical data for the last X minutes.
-- `GET /historical-data/{energy_community}?from_ts=2025-01-01T00:00:00%2B00:00&until_ts=2025-01-01T12:00:00%2B00:00` – fetch historical data in a fixed interval.
+- `GET /historical-data/{energy_community}?minutes=60&limit=100&offset=0` – fetch historical data for the last X minutes (paginated).
+- `GET /historical-data/{energy_community}?from_ts=2025-01-01T00:00:00%2B00:00&until_ts=2025-01-01T12:00:00%2B00:00&limit=100&offset=0` – fetch historical data in a fixed interval (paginated).
+- `GET /historical-data/{energy_community}?minutes=60&limit=100&offset=0&granularity_minutes=5` – fetch aggregated historical data (5-minute buckets).
 
 Notes:
 - This is a breaking change from the old `/sites` and `/real-time-data/{site_name}` endpoints.
+- `limit` is mandatory and `offset` defaults to `0`.
 - You must provide either `minutes` or (`from_ts` + `until_ts`).
 - Collection `schema` is excluded from historical responses.
-- Pagination is intentionally disabled. Large time windows can produce very large payloads.
+- When `granularity_minutes` is provided, data is grouped by UTC buckets:
+  - numeric fields: `mean`
+  - non-numeric fields: `first`
 
 Credentials and host details come from `settings.MONGO_*`. Ensure workers and the server can reach the database host.
 

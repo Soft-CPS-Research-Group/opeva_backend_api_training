@@ -650,20 +650,38 @@
           "response": []
         },
         {
-          "name": "Historical Data - Last 60 Minutes",
+          "name": "Historical Data - Last X Minutes (Paginated)",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?minutes=60"
+            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?minutes=60&limit=100&offset=0"
           },
           "response": []
         },
         {
-          "name": "Historical Data - Range (X to Y)",
+          "name": "Historical Data - Range (Paginated)",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?from_ts=2025-05-27T00:00:00%2B00:00&until_ts=2025-05-27T18:00:00%2B00:00"
+            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?from_ts=2025-05-27T00:00:00%2B00:00&until_ts=2025-05-27T18:00:00%2B00:00&limit=100&offset=0"
+          },
+          "response": []
+        },
+        {
+          "name": "Historical Data - Last X Minutes + Granularity",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?minutes=60&limit=100&offset=0&granularity_minutes=5"
+          },
+          "response": []
+        },
+        {
+          "name": "Historical Data - Range + Granularity",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?from_ts=2025-05-27T00:00:00%2B00:00&until_ts=2025-05-27T18:00:00%2B00:00&limit=100&offset=0&granularity_minutes=15"
           },
           "response": []
         },
@@ -672,7 +690,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/historical-data/i-charging_headquarters"
+            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?limit=100&offset=0"
           },
           "response": []
         },
@@ -681,7 +699,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?minutes=60&from_ts=2025-05-27T00:00:00%2B00:00&until_ts=2025-05-27T18:00:00%2B00:00"
+            "url": "{{baseUrl}}/historical-data/i-charging_headquarters?minutes=60&from_ts=2025-05-27T00:00:00%2B00:00&until_ts=2025-05-27T18:00:00%2B00:00&limit=100&offset=0"
           },
           "response": []
         },
@@ -690,7 +708,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/historical-data/non_existing_community?minutes=60"
+            "url": "{{baseUrl}}/historical-data/non_existing_community?minutes=60&limit=100&offset=0"
           },
           "response": []
         }
