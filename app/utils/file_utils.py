@@ -481,6 +481,13 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
     for col in building_collections:
 
         collection = list(db[col].aggregate(pipeline))
+        if len(collection) >= 1:
+            print("--- PRIMEIRO DOCUMENTO ---")
+            print(collection[0])
+
+        if len(collection) >= 2:
+            print("--- SEGUNDO DOCUMENTO ---")
+            print(collection[1])
         write_csv(collection, settings.BUILDING_DATASET_CSV_HEADER, col)
         for doc in collection:
             timestamp = doc["timestamp"]
