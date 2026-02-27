@@ -459,24 +459,26 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
 
 
     charging_sessions_by_charger = {}
-    # Export all building-related collections
-    for col in building_collections:
-        pipeline = [
-            {
-                "$replaceRoot": {
-                    "newRoot": {
-                        "$mergeObjects": ["$observations", {"timestamp": "$timestamp"}]
-                    }
-                }
-            },
-            {
-                "$set": {
-                    "energy_price": {
-                        "$arrayElemAt": ["$energy_price.values", 0]
-                    }
+
+    pipeline = [
+        {
+            "$replaceRoot": {
+                "newRoot": {
+                    "$mergeObjects": ["$observations", {"timestamp": "$timestamp"}]
                 }
             }
-        ]
+        },
+        {
+            "$set": {
+                "energy_price": {
+                    "$arrayElemAt": ["$energy_price.values", 0]
+                }
+            }
+        }
+    ]
+
+    # Export all building-related collections
+    for col in building_collections:
 
         collection = list(db[col].aggregate(pipeline))
         write_csv(collection, settings.BUILDING_DATASET_CSV_HEADER, col)
@@ -522,11 +524,10 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
 
                 charging_sessions_by_charger[charger_id].append(session_data)
 
-
     for charger in charging_sessions_by_charger.keys():
         write_csv(charging_sessions_by_charger.get(charger), settings.EV_DATASET_CSV_HEADER, charger)
 
-    write_csv(list(db[price_collection].find()), settings.PRICE_DATASET_CSV_HEADER, "pricing")
+    write_csv(list(db[price_collection].aggregate(pipeline)), settings.PRICE_DATASET_CSV_HEADER, "pricing")
 
     # Remove MongoDB _id if present
     structure_doc.pop("_id", None)
