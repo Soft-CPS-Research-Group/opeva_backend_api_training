@@ -96,6 +96,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
     building_collections = [c for c in collection_names if
                             any(c.startswith(f"building_{building_id}") for building_id in building_ids)]
     # TODO tratar aqui para caso building_collections esteja vazio
+    # TODO aqui deveria ser o building com mais registos
     price_collection = building_collections[0]
 
     # Parse timestamp range if provided
@@ -460,7 +461,24 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
     charging_sessions_by_charger = {}
     # Export all building-related collections
     for col in building_collections:
-        collection = list(db[col].find())
+        pipeline = [
+            {
+                "$replaceRoot": {
+                    "newRoot": {
+                        "$mergeObjects": ["$observations", {"timestamp": "$timestamp"}]
+                    }
+                }
+            },
+            {
+                "$set": {
+                    "energy_price": {
+                        "$arrayElemAt": ["$energy_price.values", 0]
+                    }
+                }
+            }
+        ]
+
+        collection = list(db[col].aggregate(pipeline))
         write_csv(collection, settings.BUILDING_DATASET_CSV_HEADER, col)
         for doc in collection:
             timestamp = doc["timestamp"]
