@@ -120,6 +120,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
     # Adjust the range if the requested timestamps exceed what's available
     if not from_dt or from_dt < latest_start:
         from_dt = latest_start
+        from_dt = pd.Timestamp(from_dt).floor(f'{period}min').to_pydatetime()
     if not until_dt or until_dt > earliest_end:
         until_dt = earliest_end
 
@@ -155,7 +156,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
 
         # Resample and aggregate the data using the specified aggregation rules per column
         # Example of aggregation_rules: {'temperature': 'mean', 'load': 'sum'}
-        aggregated_data = raw_data.resample(f'{period}min').agg(filtered_rules) # TODO como fazer com as outras regras das charging sessions
+        aggregated_data = raw_data.resample(f'{period}min', label='right', closed='right').agg(filtered_rules) # TODO como fazer com as outras regras das charging sessions
 
         # Restore original dtypes where possible, using pandas nullable types to preserve NaNs/None
         for col, original_type in column_types.items():
