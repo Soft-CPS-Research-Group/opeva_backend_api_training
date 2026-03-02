@@ -505,7 +505,7 @@ All runtime settings live in `app/config.py` (`Settings` class). Key attributes:
 | `DATASETS_DIR` | `${VM_SHARED_DATA}/datasets` | Exported datasets. |
 | `QUEUE_DIR` | `${VM_SHARED_DATA}/queue` | Agent job queue. |
 | `JOB_TRACK_FILE` | `${VM_SHARED_DATA}/job_track.json` | Persistent job registry. |
-| `AVAILABLE_HOSTS` | `["local", "gpu-server-1", "gpu-server-2", "tiago-laptop"]` | Valid `target_host` values. |
+| `AVAILABLE_HOSTS` | `["tiago-laptop", "local", "deucalion"]` | Valid `target_host` values. |
 | `HOST_HEARTBEAT_TTL` | `60` | Seconds before a host is considered offline if no heartbeat is received. |
 | `QUEUE_CLAIM_TTL` | `300` | Seconds before a claimed queue file is re-queued. |
 | `JOB_STATUS_TTL` | `300` | Seconds before a job status is considered stale. |

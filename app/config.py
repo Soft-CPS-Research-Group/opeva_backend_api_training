@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     QUEUE_CLAIM_TTL: int = 300  # seconds before a claimed queue file is re-queued
 
     # ── Hosts: simple names. "local" runs on server; others go to that worker's agent ─
-    AVAILABLE_HOSTS: list[str] = ["local", "server", "gpu-server-1", "gpu-server-2", "tiago-laptop"]
+    AVAILABLE_HOSTS: list[str] = ["tiago-laptop", "local", "deucalion"]
     HOST_HEARTBEAT_TTL: int = 60  # seconds
 
     # ── Mongo (unchanged from your setup) ───────────────────────────────────────
