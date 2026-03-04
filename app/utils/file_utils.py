@@ -96,6 +96,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
     building_collections = [c for c in collection_names if
                             any(c.startswith(f"building_{building_id}") for building_id in building_ids)]
     # TODO tratar aqui para caso building_collections esteja vazio
+    # TODO aqui deveria ser o building com mais registos
     price_collection = building_collections[0]
 
     # Parse timestamp range if provided
@@ -119,6 +120,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
     # Adjust the range if the requested timestamps exceed what's available
     if not from_dt or from_dt < latest_start:
         from_dt = latest_start
+        from_dt = pd.Timestamp(from_dt).floor(f'{period}min').to_pydatetime()
     if not until_dt or until_dt > earliest_end:
         until_dt = earliest_end
 
@@ -154,7 +156,7 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
 
         # Resample and aggregate the data using the specified aggregation rules per column
         # Example of aggregation_rules: {'temperature': 'mean', 'load': 'sum'}
-        aggregated_data = raw_data.resample(f'{period}min').agg(filtered_rules) # TODO como fazer com as outras regras das charging sessions
+        aggregated_data = raw_data.resample(f'{period}min', label='right', closed='right').agg(filtered_rules) # TODO como fazer com as outras regras das charging sessions
 
         # Restore original dtypes where possible, using pandas nullable types to preserve NaNs/None
         for col, original_type in column_types.items():
@@ -458,9 +460,35 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
 
 
     charging_sessions_by_charger = {}
+
+    pipeline = [
+        {
+            "$replaceRoot": {
+                "newRoot": {
+                    "$mergeObjects": ["$observations", {"timestamp": "$timestamp"}]
+                }
+            }
+        },
+        {
+            "$set": {
+                "energy_price": {
+                    "$arrayElemAt": ["$energy_price.values", 0]
+                }
+            }
+        }
+    ]
+
     # Export all building-related collections
     for col in building_collections:
-        collection = list(db[col].find())
+
+        collection = list(db[col].aggregate(pipeline))
+        if len(collection) >= 1:
+            print("--- PRIMEIRO DOCUMENTO ---")
+            print(collection[0])
+
+        if len(collection) >= 2:
+            print("--- SEGUNDO DOCUMENTO ---")
+            print(collection[1])
         write_csv(collection, settings.BUILDING_DATASET_CSV_HEADER, col)
         for doc in collection:
             timestamp = doc["timestamp"]
@@ -504,11 +532,10 @@ def create_dataset_dir(name: str, site_id: str, config: dict, description: str =
 
                 charging_sessions_by_charger[charger_id].append(session_data)
 
-
     for charger in charging_sessions_by_charger.keys():
         write_csv(charging_sessions_by_charger.get(charger), settings.EV_DATASET_CSV_HEADER, charger)
 
-    write_csv(list(db[price_collection].find()), settings.PRICE_DATASET_CSV_HEADER, "pricing")
+    write_csv(list(db[price_collection].aggregate(pipeline)), settings.PRICE_DATASET_CSV_HEADER, "pricing")
 
     # Remove MongoDB _id if present
     structure_doc.pop("_id", None)
