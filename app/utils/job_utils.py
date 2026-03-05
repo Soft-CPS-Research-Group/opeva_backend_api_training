@@ -205,6 +205,13 @@ def agent_pop_next_job(worker_id: str) -> dict | None:
 
             preferred = payload.get("preferred_host")
             require_host = payload.get("require_host", bool(preferred))
+
+            # Deucalion is strict: it only accepts jobs explicitly pinned to itself.
+            if worker_id == "deucalion":
+                if preferred != worker_id or not require_host:
+                    os.replace(claim_path, path)
+                    continue
+
             if preferred and preferred != worker_id and require_host:
                 os.replace(claim_path, path)
                 continue

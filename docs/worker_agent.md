@@ -13,6 +13,8 @@ are documented in `docs/jobs.md`.
 - Agents obtain work by POSTing to `/api/agent/next-job` with their
   `worker_id`. The server returns the first job whose host requirement is
   satisfied (matching host for required jobs, or any host for optional jobs).
+- Special case: worker `deucalion` is strict and only receives jobs explicitly
+  pinned to `target_host="deucalion"` (host required).
 - The response to `/api/agent/next-job` includes the fully populated payload
   (image, command, volumes, env, job name) derived from backend metadata, so
   agents do not need to read anything from the queue file beyond the job id.

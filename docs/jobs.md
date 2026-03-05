@@ -111,6 +111,8 @@ Repeated updates with the same status are accepted (idempotent).
 - `POST /api/agent/next-job`
   - Body: `{ "worker_id": "tiago-gpu" }`
   - Response: 200 + job payload or 204 if no job is available
+  - Special case: `worker_id="deucalion"` only receives jobs explicitly
+    targeted to `deucalion` (`target_host` required).
 
 - `POST /api/agent/job-status`
   - Body (example):

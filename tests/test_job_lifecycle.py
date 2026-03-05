@@ -276,6 +276,53 @@ def test_agent_skips_jobs_for_other_hosts(monkeypatch):
     assert "--job_id" in dispatched["command"]
 
 
+def test_deucalion_does_not_pick_unpinned_jobs():
+    settings.AVAILABLE_HOSTS = ["worker-a", "deucalion"]
+
+    config_payload = {"experiment": {"name": "Unpinned", "run_name": "Shared"}}
+    result = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(config=config_payload)
+        )
+    )
+    job_id = result["job_id"]
+    queue_file = Path(settings.QUEUE_DIR) / f"{job_id}.json"
+    assert queue_file.exists()
+
+    # Deucalion only accepts jobs explicitly targeted to deucalion.
+    assert job_service.agent_next_job("deucalion") is None
+    assert queue_file.exists()
+
+    # Generic workers can still consume unpinned jobs.
+    dispatched = job_service.agent_next_job("worker-a")
+    assert dispatched is not None
+    assert dispatched["job_id"] == job_id
+    assert not queue_file.exists()
+
+
+def test_deucalion_picks_only_explicit_deucalion_jobs():
+    settings.AVAILABLE_HOSTS = ["worker-a", "deucalion"]
+
+    config_payload = {"experiment": {"name": "Pinned", "run_name": "Deucalion"}}
+    result = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(config=config_payload, target_host="deucalion")
+        )
+    )
+    job_id = result["job_id"]
+    queue_file = Path(settings.QUEUE_DIR) / f"{job_id}.json"
+    assert queue_file.exists()
+
+    # Non-target worker cannot take a deucalion-pinned job.
+    assert job_service.agent_next_job("worker-a") is None
+    assert queue_file.exists()
+
+    dispatched = job_service.agent_next_job("deucalion")
+    assert dispatched is not None
+    assert dispatched["job_id"] == job_id
+    assert not queue_file.exists()
+
+
 def test_agent_flow_updates_status_and_info():
     settings.AVAILABLE_HOSTS = ["local", "worker-a"]
     job_id = "job-agent"
