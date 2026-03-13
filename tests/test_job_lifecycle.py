@@ -139,6 +139,44 @@ def test_launch_local_is_queued():
     assert status_data["status"] == JobStatus.QUEUED.value
 
 
+def test_launch_prefers_metadata_experiment_identity():
+    settings.AVAILABLE_HOSTS = ["local"]
+
+    payload = {
+        "metadata": {"experiment_name": "MetaExp", "run_name": "MetaRun"},
+        "experiment": {"name": "LegacyExp", "run_name": "LegacyRun"},
+    }
+
+    result = asyncio.run(
+        job_service.launch_simulation(JobLaunchRequest(config=payload))
+    )
+    job_id = result["job_id"]
+
+    assert job_service.jobs[job_id]["experiment_name"] == "MetaExp"
+    assert job_service.jobs[job_id]["run_name"] == "MetaRun"
+    assert job_service.jobs[job_id]["job_name"] == "MetaExp-MetaRun"
+
+    info_path = Path(settings.JOBS_DIR) / job_id / "job_info.json"
+    info = json.loads(info_path.read_text())
+    assert info["experiment_name"] == "MetaExp"
+    assert info["run_name"] == "MetaRun"
+
+
+def test_launch_falls_back_to_legacy_experiment_identity():
+    settings.AVAILABLE_HOSTS = ["local"]
+
+    payload = {"experiment": {"name": "LegacyExp", "run_name": "LegacyRun"}}
+
+    result = asyncio.run(
+        job_service.launch_simulation(JobLaunchRequest(config=payload))
+    )
+    job_id = result["job_id"]
+
+    assert job_service.jobs[job_id]["experiment_name"] == "LegacyExp"
+    assert job_service.jobs[job_id]["run_name"] == "LegacyRun"
+    assert job_service.jobs[job_id]["job_name"] == "LegacyExp-LegacyRun"
+
+
 def test_launch_rejects_unknown_host():
     payload = {"experiment": {"name": "Bad", "run_name": "Run"}}
 

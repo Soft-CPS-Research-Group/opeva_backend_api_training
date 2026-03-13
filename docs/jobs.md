@@ -30,6 +30,11 @@ Default root: `/opt/opeva_shared_data` (configurable via `VM_SHARED_DATA`).
 
 ## Files and Their Responsibilities
 
+## Config Identity Keys
+- Preferred fields: `metadata.experiment_name` and `metadata.run_name`.
+- Legacy fallback remains supported: `experiment.name` and `experiment.run_name`.
+- If neither is present, the API falls back to `UnnamedExperiment`/`UnnamedRun`.
+
 ### queue/<job_id>.json
 Created by the API when a job is queued. Contains only scheduling metadata:
 - `job_id`: string

@@ -402,6 +402,7 @@ curl -X DELETE http://SERVER:8000/experiment-config/demo.yaml
 ```
 
 Launching jobs can reference any file stored in `configs/` via `config_path`. Inline configs are also supported by providing a `config` object in the job submission payload; the API will persist it using `save_as` or a generated name.
+For experiment naming, the API prefers `metadata.experiment_name` + `metadata.run_name` and keeps backward compatibility with legacy `experiment.name` + `experiment.run_name`.
 
 ---
 

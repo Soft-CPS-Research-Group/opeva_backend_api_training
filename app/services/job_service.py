@@ -174,6 +174,31 @@ def _safe_filename(value: str) -> str:
     return cleaned
 
 
+def _resolve_experiment_identity(config: dict) -> tuple[str, str]:
+    metadata = config.get("metadata", {}) if isinstance(config, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    experiment_name = str(metadata.get("experiment_name", "")).strip()
+    run_name = str(metadata.get("run_name", "")).strip()
+
+    if not experiment_name or not run_name:
+        legacy = config.get("experiment", {}) if isinstance(config, dict) else {}
+        if not isinstance(legacy, dict):
+            legacy = {}
+        if not experiment_name:
+            experiment_name = str(legacy.get("name", "")).strip()
+        if not run_name:
+            run_name = str(legacy.get("run_name", "")).strip()
+
+    if not experiment_name:
+        experiment_name = "UnnamedExperiment"
+    if not run_name:
+        run_name = "UnnamedRun"
+
+    return experiment_name, run_name
+
+
 def record_host_heartbeat(worker_id: str, info: dict | None = None) -> None:
     if not job_utils.is_valid_host(worker_id):
         raise HTTPException(400, f"Unknown worker_id '{worker_id}'. Allowed: {settings.AVAILABLE_HOSTS}")
@@ -302,8 +327,7 @@ async def launch_simulation(request: JobLaunchRequest):
     else:
         raise HTTPException(400, "Missing config or config_path")
 
-    experiment_name = config.get("experiment", {}).get("name", "UnnamedExperiment")
-    run_name = config.get("experiment", {}).get("run_name", "UnnamedRun")
+    experiment_name, run_name = _resolve_experiment_identity(config)
     job_name = _slug(f"{experiment_name}-{run_name}")
 
     if not config_path.startswith("configs/"):
