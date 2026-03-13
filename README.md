@@ -85,7 +85,9 @@ Default root: `/opt/opeva_shared_data` (configurable through `settings.VM_SHARED
 │       ├── status.json
 │       ├── logs/<job_id>.log
 │       ├── progress/progress.json
-│       └── results/result.json
+│       └── results/
+│           ├── result.json
+│           └── simulation_data/<session|timestamp>/...   # optional simulator CSV exports
 ├── queue/              # One JSON payload per queued job (`<job_id>.json`) + claim files
 └── job_track.json      # Registry of known jobs (persisted cache)
 ```
