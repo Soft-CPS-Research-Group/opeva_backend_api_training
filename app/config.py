@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     CONTAINER_NAME_PREFIX: str = "opeva_job"
     WORKER_STALE_GRACE_SECONDS: int = 120  # additional grace beyond heartbeat TTL
     JOB_STATUS_TTL: int = 300  # seconds before a job status is considered stale
+    MLFLOW_UI_BASE_URL: str | None = None
 
     def mongo_uri(self, db_name: str) -> str:
         return (

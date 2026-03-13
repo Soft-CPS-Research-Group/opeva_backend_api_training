@@ -143,6 +143,7 @@ The application reads configuration from environment variables via `pydantic-set
 | `VM_SHARED_DATA` | Root path of the shared storage (default `/opt/opeva_shared_data`). |
 | `AVAILABLE_HOSTS` | Comma-separated list of host names (`local` must be included). |
 | `MONGO_*` vars     | Credentials/host/port for site databases. |
+| `MLFLOW_UI_BASE_URL` | Optional MLflow UI base URL used to build clickable run links in job info/list responses. |
 
 Set them in your shell or a systemd unit before starting the API.
 
@@ -270,7 +271,10 @@ Staleness is detected using `status_updated_at` (job heartbeats) and host heartb
   "container_id": "<docker-id>",
   "container_name": "opeva_sim_1234_Demo-Run1",
   "experiment_name": "Demo",
-  "run_name": "Run1"
+  "run_name": "Run1",
+  "mlflow_run_id": "abc123...",
+  "mlflow_experiment_id": "42",
+  "mlflow_run_url": "https://mlflow-ui/#/experiments/42/runs/abc123..."
 }
 ```
 
@@ -515,6 +519,7 @@ All runtime settings live in `app/config.py` (`Settings` class). Key attributes:
 | `WORKER_STALE_GRACE_SECONDS` | `120` | Extra grace beyond heartbeat TTL before marking jobs failed. |
 | `DEFAULT_JOB_IMAGE` | `calof/opeva_simulator:latest` | Container image to run on workers. |
 | `CONTAINER_NAME_PREFIX` | `opeva_job` | Prefix for container names sent to workers. |
+| `MLFLOW_UI_BASE_URL` | `None` | Optional base URL to expose MLflow run links in API payloads. |
 | `MONGO_*` | `runtimeUI` / `runtimeUIDB` / host `193.136.62.78` | Mongo connection details. |
 | `ACCEPTABLE_GAP_IN_MINUTES` | `60` | Controls interpolation in dataset exports. |
 

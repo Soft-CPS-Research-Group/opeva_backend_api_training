@@ -35,6 +35,7 @@ def jobs_env(tmp_path, monkeypatch):
         "QUEUE_DIR": settings.QUEUE_DIR,
         "JOB_TRACK_FILE": settings.JOB_TRACK_FILE,
         "AVAILABLE_HOSTS": list(settings.AVAILABLE_HOSTS),
+        "MLFLOW_UI_BASE_URL": settings.MLFLOW_UI_BASE_URL,
         "HOST_HEARTBEATS": dict(job_service.host_heartbeats),
     }
 
@@ -248,6 +249,7 @@ def test_record_host_heartbeat_enforces_known_hosts():
 
 
 def test_list_jobs_reports_latest_status(monkeypatch):
+    settings.MLFLOW_UI_BASE_URL = "https://mlflow-ui.example"
     job_id = "job-list"
     job_service.jobs[job_id] = {
         "job_id": job_id,
@@ -265,6 +267,8 @@ def test_list_jobs_reports_latest_status(monkeypatch):
         "job_name": "Demo",
         "config_path": "configs/demo.yaml",
         "target_host": "remote",
+        "run_id": "run-1",
+        "experiment_id": "exp-1",
     }
     (job_dir / "job_info.json").write_text(json.dumps(info))
 
@@ -272,6 +276,53 @@ def test_list_jobs_reports_latest_status(monkeypatch):
     [entry] = result
     assert entry["status"] == JobStatus.RUNNING.value
     assert entry["job_info"]["job_name"] == "Demo"
+    assert entry["job_info"]["mlflow_run_url"] == "https://mlflow-ui.example/#/experiments/exp-1/runs/run-1"
+
+
+def test_get_job_info_adds_mlflow_run_url_when_base_url_is_configured():
+    settings.MLFLOW_UI_BASE_URL = "https://mlflow-ui.example"
+    job_id = "job-mlflow-url"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "status": JobStatus.RUNNING.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    info = {
+        "job_id": job_id,
+        "run_id": "run-9",
+        "experiment_id": "exp-3",
+    }
+    (job_dir / "job_info.json").write_text(json.dumps(info))
+
+    result = job_service.get_job_info(job_id)
+    assert result["mlflow_run_id"] == "run-9"
+    assert result["mlflow_experiment_id"] == "exp-3"
+    assert result["mlflow_run_url"] == "https://mlflow-ui.example/#/experiments/exp-3/runs/run-9"
+
+
+def test_get_job_info_keeps_backward_compat_when_base_url_missing():
+    settings.MLFLOW_UI_BASE_URL = None
+    job_id = "job-mlflow-no-url"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "status": JobStatus.RUNNING.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    info = {
+        "job_id": job_id,
+        "mlflow_run_id": "run-44",
+        "mlflow_experiment_id": "exp-12",
+    }
+    (job_dir / "job_info.json").write_text(json.dumps(info))
+
+    result = job_service.get_job_info(job_id)
+    assert result["mlflow_run_id"] == "run-44"
+    assert result["mlflow_experiment_id"] == "exp-12"
+    assert "mlflow_run_url" not in result
 
 
 def test_launch_defaults_to_first_host():

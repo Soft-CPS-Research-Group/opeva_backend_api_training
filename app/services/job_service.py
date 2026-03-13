@@ -199,6 +199,43 @@ def _resolve_experiment_identity(config: dict) -> tuple[str, str]:
     return experiment_name, run_name
 
 
+def _build_mlflow_run_url(
+    *,
+    base_url: Optional[str],
+    experiment_id: Optional[str],
+    run_id: Optional[str],
+) -> Optional[str]:
+    if not base_url or not experiment_id or not run_id:
+        return None
+    normalized = base_url.rstrip("/")
+    return f"{normalized}/#/experiments/{experiment_id}/runs/{run_id}"
+
+
+def _enrich_job_info_with_mlflow_links(info: dict) -> dict:
+    if not isinstance(info, dict):
+        return info
+
+    enriched = dict(info)
+    run_id = enriched.get("mlflow_run_id") or enriched.get("run_id")
+    experiment_id = enriched.get("mlflow_experiment_id") or enriched.get("experiment_id")
+
+    if run_id is not None and "mlflow_run_id" not in enriched:
+        enriched["mlflow_run_id"] = run_id
+    if experiment_id is not None and "mlflow_experiment_id" not in enriched:
+        enriched["mlflow_experiment_id"] = experiment_id
+
+    if "mlflow_run_url" not in enriched or not enriched.get("mlflow_run_url"):
+        derived_url = _build_mlflow_run_url(
+            base_url=settings.MLFLOW_UI_BASE_URL,
+            experiment_id=str(experiment_id) if experiment_id is not None else None,
+            run_id=str(run_id) if run_id is not None else None,
+        )
+        if derived_url:
+            enriched["mlflow_run_url"] = derived_url
+
+    return enriched
+
+
 def record_host_heartbeat(worker_id: str, info: dict | None = None) -> None:
     if not job_utils.is_valid_host(worker_id):
         raise HTTPException(400, f"Unknown worker_id '{worker_id}'. Allowed: {settings.AVAILABLE_HOSTS}")
@@ -455,6 +492,7 @@ def list_jobs():
         if os.path.exists(ipath):
             with open(ipath) as f:
                 info = json.load(f)
+            info = _enrich_job_info_with_mlflow_links(info)
 
         status = get_status(job_id)["status"]
 
@@ -473,7 +511,8 @@ def get_job_info(job_id: str):
     if not os.path.exists(p):
         raise HTTPException(404, "Job info not found")
     with open(p) as f:
-        return json.load(f)
+        info = json.load(f)
+    return _enrich_job_info_with_mlflow_links(info)
 
 def delete_job(job_id: str):
     _refresh_jobs()
