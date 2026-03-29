@@ -14,24 +14,51 @@ from fastapi import HTTPException
 from app.config import settings
 from app.utils import mongo_utils
 
+def _safe_config_filename(file_name: str) -> str:
+    normalized = os.path.normpath(file_name).strip().lstrip("/\\")
+    if normalized.startswith("..") or os.path.isabs(file_name) or os.sep in normalized:
+        raise ValueError("Invalid config file name")
+    return normalized
+
 def save_config_dict(config: dict, file_name: str) -> str:
-    full_path = os.path.join(settings.CONFIGS_DIR, file_name)
+    safe_file_name = _safe_config_filename(file_name)
+    full_path = os.path.join(settings.CONFIGS_DIR, safe_file_name)
     with open(full_path, "w") as f:
         yaml.dump(config, f)
-    return file_name
+    return safe_file_name
+
+
+def save_config_yaml_content(yaml_content: str, file_name: str) -> str:
+    safe_file_name = _safe_config_filename(file_name)
+    yaml.safe_load(yaml_content or "")
+    full_path = os.path.join(settings.CONFIGS_DIR, safe_file_name)
+    with open(full_path, "w", encoding="utf-8") as f:
+        f.write(yaml_content)
+    return safe_file_name
 
 def list_config_files():
     return [f for f in os.listdir(settings.CONFIGS_DIR) if f.endswith(('.yaml', '.yml'))]
 
 def load_config_file(file_name):
-    path = os.path.join(settings.CONFIGS_DIR, file_name)
+    safe_file_name = _safe_config_filename(file_name)
+    path = os.path.join(settings.CONFIGS_DIR, safe_file_name)
     if not os.path.exists(path):
-        raise FileNotFoundError(f"Config {file_name} not found")
+        raise FileNotFoundError(f"Config {safe_file_name} not found")
     with open(path) as f:
         return yaml.safe_load(f)
 
+
+def load_config_file_text(file_name: str) -> str:
+    safe_file_name = _safe_config_filename(file_name)
+    path = os.path.join(settings.CONFIGS_DIR, safe_file_name)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Config {safe_file_name} not found")
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
 def delete_config_by_name(file_name):
-    path = os.path.join(settings.CONFIGS_DIR, file_name)
+    safe_file_name = _safe_config_filename(file_name)
+    path = os.path.join(settings.CONFIGS_DIR, safe_file_name)
     if os.path.exists(path):
         os.remove(path)
         return True

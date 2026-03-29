@@ -277,6 +277,55 @@ def test_list_jobs_reports_latest_status(monkeypatch):
     assert entry["status"] == JobStatus.RUNNING.value
     assert entry["job_info"]["job_name"] == "Demo"
     assert entry["job_info"]["mlflow_run_url"] == "https://mlflow-ui.example/#/experiments/exp-1/runs/run-1"
+    assert "queue_wait_seconds" in entry
+    assert "run_duration_seconds" in entry
+    assert "total_duration_seconds" in entry
+    assert "job_meta" in entry
+    assert entry["job_meta"]["job_id"] == job_id
+
+
+def test_get_result_exposes_simulation_data_metadata():
+    job_id = "job-with-results"
+    base = Path(settings.JOBS_DIR) / job_id / "results"
+    sim_session = base / "simulation_data" / "session-01"
+    sim_session.mkdir(parents=True, exist_ok=True)
+    (base / "result.json").write_text(json.dumps({"evaluation": {"kpis": {"score": 1.2}}}))
+    (sim_session / "exported_kpis.csv").write_text("timestamp,kpi,value\n2024-08-01T00:00:00Z,score,1.2\n")
+
+    payload = job_service.get_result(job_id)
+    assert payload["simulation_data_available"] is True
+    assert payload["simulation_data_session_default"] == "session-01"
+    assert payload["kpi_source"] == "simulation_data/exported_kpis.csv"
+    assert "simulation_data_dir" in payload
+
+
+def test_list_jobs_contains_lifecycle_timestamps():
+    job_id = "job-lifecycle"
+    now = time.time()
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "status": JobStatus.RUNNING.value,
+        "submitted_at": now - 120,
+        "queued_at": now - 115,
+        "dispatched_at": now - 100,
+        "started_at": now - 90,
+        "last_status_at": now - 10,
+        "attempt_number": 2,
+        "requeue_count": 1,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "job_info.json").write_text(json.dumps({"job_id": job_id}))
+    job_utils.write_status_file(job_id, JobStatus.RUNNING.value, {"last_status_at": now - 10})
+
+    [entry] = [item for item in job_service.list_jobs() if item["job_id"] == job_id]
+    assert entry["submitted_at"] is not None
+    assert entry["started_at"] is not None
+    assert entry["queue_wait_seconds"] is not None
+    assert entry["run_duration_seconds"] is not None
+    assert entry["attempt_number"] == 2
+    assert entry["requeue_count"] == 1
 
 
 def test_get_job_info_adds_mlflow_run_url_when_base_url_is_configured():

@@ -1,6 +1,7 @@
 # app/config.py
 import os
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import ClassVar
 
 class Settings(BaseSettings):
@@ -76,6 +77,22 @@ class Settings(BaseSettings):
     WORKER_STALE_GRACE_SECONDS: int = 120  # additional grace beyond heartbeat TTL
     JOB_STATUS_TTL: int = 300  # seconds before a job status is considered stale
     MLFLOW_UI_BASE_URL: str | None = None
+    CORS_ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:8006",
+        "https://softcps.dei.isep.ipp.pt:3001",
+        "https://softcps.dei.isep.ipp.pt:8001",
+    ]
+
+    @field_validator("CORS_ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value):
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("["):
+                return value
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return value
 
     def mongo_uri(self, db_name: str) -> str:
         return (

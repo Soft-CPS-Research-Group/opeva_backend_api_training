@@ -2,6 +2,7 @@
 import os, re, json, yaml, time, logging
 from uuid import uuid4
 from typing import Generator, Optional
+from pathlib import Path
 from fastapi import HTTPException
 
 from app.config import settings
@@ -22,12 +23,36 @@ CAPACITY_COUNT_STATUSES = {
     JobStatus.STOP_REQUESTED.value,
 }
 
+ACTIVE_JOB_STATUSES = {
+    JobStatus.DISPATCHED.value,
+    JobStatus.RUNNING.value,
+    JobStatus.STOP_REQUESTED.value,
+}
+
+TERMINAL_JOB_STATUSES = {
+    JobStatus.FINISHED.value,
+    JobStatus.FAILED.value,
+    JobStatus.STOPPED.value,
+    JobStatus.CANCELED.value,
+}
+
 DEFAULT_JOB_CLEANUP_KEEP = {
     "sample_job",
     "running_job",
     "failed_job",
     "queued_job",
 }
+
+
+def _ensure_float(value) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _is_yaml_filename(value: str) -> bool:
+    lower = str(value).lower()
+    return lower.endswith(".yaml") or lower.endswith(".yml")
 
 def _refresh_jobs():
     """Reload the job registry from disk to keep multiple workers in sync."""
@@ -113,6 +138,59 @@ def _status_last_update(job_id: str) -> Optional[float]:
             return None
     return None
 
+
+def _apply_lifecycle_metadata(meta: dict, *, prev_status: str | None, status: str, status_ts: float) -> None:
+    meta["last_status_at"] = status_ts
+
+    if "submitted_at" not in meta:
+        meta["submitted_at"] = status_ts
+
+    if status == JobStatus.QUEUED.value:
+        if prev_status in (None, JobStatus.LAUNCHING.value):
+            meta.setdefault("queued_at", status_ts)
+        elif prev_status != JobStatus.QUEUED.value:
+            meta["requeue_count"] = int(meta.get("requeue_count", 0) or 0) + 1
+            meta["queued_at"] = status_ts
+    elif status == JobStatus.DISPATCHED.value:
+        if prev_status != JobStatus.DISPATCHED.value:
+            meta["attempt_number"] = int(meta.get("attempt_number", 0) or 0) + 1
+        meta["dispatched_at"] = status_ts
+    elif status == JobStatus.RUNNING.value:
+        meta.setdefault("started_at", status_ts)
+    elif status == JobStatus.STOP_REQUESTED.value:
+        meta["stop_requested_at"] = status_ts
+
+    if status in TERMINAL_JOB_STATUSES:
+        meta["finished_at"] = status_ts
+
+
+def _compute_job_durations(meta: dict, now_ts: float | None = None) -> dict:
+    now = now_ts or time.time()
+    submitted_at = _ensure_float(meta.get("submitted_at"))
+    queued_at = _ensure_float(meta.get("queued_at"))
+    started_at = _ensure_float(meta.get("started_at"))
+    finished_at = _ensure_float(meta.get("finished_at"))
+
+    queue_wait_seconds = None
+    if queued_at and started_at:
+        queue_wait_seconds = max(0.0, started_at - queued_at)
+
+    run_duration_seconds = None
+    if started_at:
+        run_end = finished_at or now
+        run_duration_seconds = max(0.0, run_end - started_at)
+
+    total_duration_seconds = None
+    if submitted_at:
+        total_end = finished_at or now
+        total_duration_seconds = max(0.0, total_end - submitted_at)
+
+    return {
+        "queue_wait_seconds": queue_wait_seconds,
+        "run_duration_seconds": run_duration_seconds,
+        "total_duration_seconds": total_duration_seconds,
+    }
+
 def _write_status(job_id: str, status: str, extra: dict | None = None):
     """Persist status to disk and update the in-memory jobs cache."""
     prev = _read_status_file(job_id)
@@ -126,11 +204,15 @@ def _write_status(job_id: str, status: str, extra: dict | None = None):
         status,
         sorted((extra or {}).keys()),
     )
+    status_ts = time.time()
     extra_payload = dict(extra or {})
-    extra_payload.setdefault("status_updated_at", time.time())
+    extra_payload.setdefault("status_updated_at", status_ts)
+    extra_payload.setdefault("last_status_at", status_ts)
     job_utils.write_status_file(job_id, status, extra_payload)
     if job_id in jobs:
+        prev_status = jobs[job_id].get("status")
         jobs[job_id]["status"] = status
+        _apply_lifecycle_metadata(jobs[job_id], prev_status=prev_status, status=status, status_ts=status_ts)
         if extra_payload:
             jobs[job_id].update(extra_payload)
         job_utils.save_job(job_id, jobs[job_id])
@@ -138,12 +220,16 @@ def _write_status(job_id: str, status: str, extra: dict | None = None):
 
 def _force_status(job_id: str, status: str, extra: dict | None = None) -> None:
     """Write status without enforcing state transitions (ops override)."""
+    status_ts = time.time()
     extra_payload = dict(extra or {})
-    extra_payload.setdefault("status_updated_at", time.time())
+    extra_payload.setdefault("status_updated_at", status_ts)
+    extra_payload.setdefault("last_status_at", status_ts)
     job_utils.write_status_file(job_id, status, extra_payload)
     meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
     if meta:
+        prev_status = meta.get("status")
         meta["status"] = status
+        _apply_lifecycle_metadata(meta, prev_status=prev_status, status=status, status_ts=status_ts)
         meta.update(extra_payload)
         job_utils.save_job(job_id, meta)
         jobs[job_id] = meta
@@ -157,6 +243,19 @@ def _host_active_count(host: str) -> int:
         if job.get("status") in CAPACITY_COUNT_STATUSES:
             total += 1
     return total
+
+
+def _active_job_ids_for_host(host: str) -> list[str]:
+    active: list[tuple[str, float]] = []
+    for job_id, meta in jobs.items():
+        if meta.get("target_host") != host:
+            continue
+        if meta.get("status") not in ACTIVE_JOB_STATUSES:
+            continue
+        updated = _ensure_float(meta.get("last_status_at")) or _ensure_float(meta.get("status_updated_at")) or 0.0
+        active.append((job_id, updated))
+    active.sort(key=lambda item: item[1], reverse=True)
+    return [job_id for job_id, _ in active]
 
 
 def _preferred_host(requested: Optional[str]) -> Optional[str]:
@@ -258,18 +357,82 @@ def _host_status_snapshot() -> dict[str, dict]:
             active = any(
                 (job.get("target_host") == host)
                 and job.get("status")
-                in (JobStatus.RUNNING.value, JobStatus.DISPATCHED.value, JobStatus.STOP_REQUESTED.value)
+                in ACTIVE_JOB_STATUSES
                 for job in jobs.values()
             )
             if active:
                 online = True
+        active_job_ids = _active_job_ids_for_host(host)
+        current_job_id = active_job_ids[0] if active_job_ids else None
+        current_job_status = jobs.get(current_job_id, {}).get("status") if current_job_id else None
+        raw_info = hb["info"] if hb else {}
+        if not isinstance(raw_info, dict):
+            raw_info = {}
+        normalized_info = dict(raw_info)
+        normalized_info["executor"] = raw_info.get("executor")
+        normalized_info["worker_version"] = raw_info.get("worker_version") or raw_info.get("version")
+        normalized_info["active_job_id"] = raw_info.get("active_job_id") or current_job_id
+        normalized_info["active_job_count"] = raw_info.get("active_job_count")
+        normalized_info["last_job_id"] = raw_info.get("last_job_id")
+        normalized_info["last_terminal_status"] = raw_info.get("last_terminal_status")
+        normalized_info["budget"] = raw_info.get("budget")
+        normalized_info["budget_refreshed_at"] = raw_info.get("budget_refreshed_at")
+        if normalized_info["active_job_count"] is None:
+            normalized_info["active_job_count"] = len(active_job_ids)
         snapshot[host] = {
             "online": online,
             "last_seen": hb["last_seen"] if hb else None,
-            "info": hb["info"] if hb else {},
+            "info": normalized_info,
             "running": _host_active_count(host),
+            "active_job_ids": active_job_ids,
+            "current_job_id": current_job_id,
+            "current_job_status": current_job_status,
         }
     return snapshot
+
+
+def _job_results_root(job_id: str) -> Path:
+    return Path(settings.JOBS_DIR) / job_id / "results"
+
+
+def _simulation_data_root(job_id: str) -> Path:
+    return _job_results_root(job_id) / "simulation_data"
+
+
+def _latest_simulation_session_path(sim_root: Path) -> tuple[str | None, Path | None]:
+    if not sim_root.exists() or not sim_root.is_dir():
+        return None, None
+    directories = [item for item in sim_root.iterdir() if item.is_dir()]
+    if directories:
+        latest = sorted(directories, key=lambda item: item.stat().st_mtime)[-1]
+        return latest.name, latest
+    return "root", sim_root
+
+
+def _resolve_kpi_source(result_payload: dict, sim_session_path: Path | None) -> str:
+    if sim_session_path and sim_session_path.exists():
+        for candidate in sim_session_path.rglob("exported_kpis.csv"):
+            if candidate.is_file():
+                return "simulation_data/exported_kpis.csv"
+    evaluation = result_payload.get("evaluation")
+    if isinstance(evaluation, dict) and isinstance(evaluation.get("kpis"), dict):
+        return "result.evaluation.kpis"
+    if isinstance(result_payload.get("kpis"), dict):
+        return "result.kpis"
+    return "unknown"
+
+
+def _simulation_data_metadata(job_id: str, result_payload: dict) -> dict:
+    sim_root = _simulation_data_root(job_id)
+    session_name, session_path = _latest_simulation_session_path(sim_root)
+    simulation_data_available = bool(session_path and session_path.exists())
+    kpi_source = _resolve_kpi_source(result_payload, session_path)
+    return {
+        "simulation_data_available": simulation_data_available,
+        "simulation_data_session_default": session_name,
+        "simulation_data_dir": str(session_path) if session_path else None,
+        "kpi_source": kpi_source,
+    }
 
 
 def _mark_stale_jobs():
@@ -416,7 +579,11 @@ def get_status(job_id: str):
 
 
 def get_result(job_id: str):
-    return file_utils.collect_results(job_id)
+    payload = file_utils.collect_results(job_id)
+    if not isinstance(payload, dict):
+        payload = {"result": payload}
+    payload.update(_simulation_data_metadata(job_id, payload))
+    return payload
 
 def get_progress(job_id: str):
     return file_utils.read_progress(job_id)
@@ -494,9 +661,35 @@ def list_jobs():
                 info = json.load(f)
             info = _enrich_job_info_with_mlflow_links(info)
 
-        status = get_status(job_id)["status"]
-
-        result.append({"job_id": job_id, "status": status, "job_info": info})
+        status_payload = get_status(job_id)
+        status = status_payload["status"]
+        merged = dict(job)
+        merged["job_id"] = job_id
+        merged["status"] = status
+        if "config_path" in merged and not _is_yaml_filename(str(merged["config_path"])):
+            # Keep backward compatibility but normalize config extension when legacy jobs exist.
+            merged["config_path"] = str(merged["config_path"])
+        durations = _compute_job_durations(merged)
+        result.append(
+            {
+                "job_id": job_id,
+                "status": status,
+                "job_info": info,
+                "submitted_at": merged.get("submitted_at"),
+                "queued_at": merged.get("queued_at"),
+                "dispatched_at": merged.get("dispatched_at"),
+                "started_at": merged.get("started_at"),
+                "stop_requested_at": merged.get("stop_requested_at"),
+                "finished_at": merged.get("finished_at"),
+                "last_status_at": merged.get("last_status_at") or status_payload.get("last_status_at"),
+                "queue_wait_seconds": durations.get("queue_wait_seconds"),
+                "run_duration_seconds": durations.get("run_duration_seconds"),
+                "total_duration_seconds": durations.get("total_duration_seconds"),
+                "requeue_count": int(merged.get("requeue_count", 0) or 0),
+                "attempt_number": int(merged.get("attempt_number", 0) or 0),
+                "job_meta": merged,
+            }
+        )
     return result
 
 

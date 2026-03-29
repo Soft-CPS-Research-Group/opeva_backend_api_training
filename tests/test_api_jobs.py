@@ -288,3 +288,70 @@ def test_ops_requeue_endpoint(api_client, monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == JobStatus.QUEUED.value
+
+
+def test_experiment_config_yaml_endpoints(api_client):
+    create = api_client.post(
+        "/experiment-config/create",
+        json={"file_name": "api-config.yaml", "yaml_content": "experiment:\n  name: api-test\n"},
+    )
+    assert create.status_code == 200
+    assert create.json()["file"] == "api-config.yaml"
+
+    get_resp = api_client.get("/experiment-config/api-config.yaml")
+    assert get_resp.status_code == 200
+    assert "experiment:" in get_resp.text
+    assert get_resp.headers["content-type"].startswith("text/yaml")
+
+    update = api_client.put(
+        "/experiment-config/api-config.yaml",
+        json={"yaml_content": "experiment:\n  name: api-test-updated\n"},
+    )
+    assert update.status_code == 200
+    assert update.json()["message"] == "Config updated"
+
+    delete = api_client.delete("/experiment-config/api-config.yaml")
+    assert delete.status_code == 200
+
+
+def test_experiment_config_invalid_yaml_returns_422(api_client):
+    bad = api_client.post(
+        "/experiment-config/create",
+        json={"file_name": "bad.yaml", "yaml_content": "experiment: [\n"},
+    )
+    assert bad.status_code == 422
+    detail = bad.json().get("detail", "")
+    assert "Invalid YAML" in detail
+    assert "line" in detail.lower()
+
+
+def test_hosts_include_active_job_ids_and_current_job(api_client, monkeypatch):
+    from app.config import settings
+    from app.services import job_service
+
+    monkeypatch.setattr(settings, "AVAILABLE_HOSTS", ["worker-a"])
+
+    payload = {"experiment": {"name": "Hosts", "run_name": "Active"}}
+    response = api_client.post(
+        "/run-simulation",
+        json={"config": payload, "target_host": "worker-a"},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    dispatched = job_service.agent_next_job("worker-a")
+    assert dispatched is not None
+    running = api_client.post(
+        "/api/agent/job-status",
+        json={"job_id": job_id, "status": "running", "worker_id": "worker-a"},
+    )
+    assert running.status_code == 200
+
+    hosts_resp = api_client.get("/hosts")
+    assert hosts_resp.status_code == 200
+    hosts = hosts_resp.json()["hosts"]
+    row = hosts["worker-a"]
+    assert job_id in row["active_job_ids"]
+    assert row["current_job_id"] == job_id
+    assert row["current_job_status"] == "running"
+    assert "info" in row

@@ -47,10 +47,10 @@ def shared_env(tmp_path, monkeypatch):
 
 
 def test_config_service_crud(shared_env):
-    payload = {"foo": "bar"}
+    payload = "foo: bar\n"
     file_name = "demo.yaml"
 
-    resp = config_service.save_config(payload, file_name)
+    resp = config_service.save_config_yaml(payload, file_name)
     assert resp["message"] == "Config saved"
 
     path = Path(settings.CONFIGS_DIR) / file_name
@@ -60,21 +60,29 @@ def test_config_service_crud(shared_env):
     assert file_name in configs
 
     data = config_service.get_config_by_name(file_name)
-    assert data["config"]["foo"] == "bar"
+    assert "foo: bar" in data["yaml_content"]
+
+    update_resp = config_service.update_config_yaml(file_name, "foo: baz\n")
+    assert update_resp["message"] == "Config updated"
+    assert "foo: baz" in config_service.get_config_by_name(file_name)["yaml_content"]
 
     resp = config_service.delete_config(file_name)
     assert file_name not in config_service.list_configs()
     assert resp["message"].startswith("Config")
 
-    with pytest.raises(FileNotFoundError):
-        config_service.delete_config(file_name)
-
-
-def test_config_controller_create_handles_exists(monkeypatch):
-    monkeypatch.setattr(config_service, "save_config", lambda *a, **k: (_ for _ in ()).throw(FileExistsError("exists")))
     with pytest.raises(HTTPException) as exc:
-        config_controller.create_config({}, "demo.yaml")
-    assert exc.value.status_code == 400
+        config_service.delete_config(file_name)
+    assert exc.value.status_code == 404
+
+
+def test_config_controller_create_handles_invalid_yaml(monkeypatch):
+    def _raise(*_args, **_kwargs):
+        raise HTTPException(status_code=422, detail="Invalid YAML")
+
+    monkeypatch.setattr(config_service, "save_config_yaml", _raise)
+    with pytest.raises(HTTPException) as exc:
+        config_controller.create_config("foo: [", "demo.yaml")
+    assert exc.value.status_code == 422
 
 
 def test_dataset_service_create_calls_file_utils(monkeypatch):

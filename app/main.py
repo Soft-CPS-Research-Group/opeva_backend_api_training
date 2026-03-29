@@ -2,19 +2,14 @@ from fastapi import FastAPI
 from app.api.router import api_router
 from app.utils.job_utils import ensure_directories
 from fastapi.middleware.cors import CORSMiddleware
+from app.config import settings
 
 app = FastAPI()
 ensure_directories()
 
-origins = [
-    "http://localhost:5173",
-    "https://softcps.dei.isep.ipp.pt:3001",
-    "https://softcps.dei.isep.ipp.pt:8001"
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=settings.CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
