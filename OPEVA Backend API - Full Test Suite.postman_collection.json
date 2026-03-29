@@ -291,7 +291,7 @@
           "response": []
         },
         {
-          "name": "Get Logs",
+          "name": "Get Logs (run_id/job_id fallback)",
           "request": {
             "method": "GET",
             "header": [],
@@ -300,7 +300,7 @@
           "response": []
         },
         {
-          "name": "Get Logs File",
+          "name": "Get Logs File (run_id/job_id fallback)",
           "request": {
             "method": "GET",
             "header": [],

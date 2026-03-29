@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -176,6 +177,60 @@ def test_queue_endpoint_lists_entries(api_client, monkeypatch):
     assert queue_resp.status_code == 200
     entries = queue_resp.json()
     assert any(entry.get("job_id") == job_id for entry in entries)
+
+
+def test_run_simulation_allows_job_name_and_submitted_by(api_client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AVAILABLE_HOSTS", ["worker-a"])
+
+    config_file = Path(settings.CONFIGS_DIR) / "named.yaml"
+    config_file.write_text(yaml.safe_dump({"metadata": {"experiment_name": "Exp", "run_name": "Run"}}))
+
+    response = api_client.post(
+        "/run-simulation",
+        json={
+            "config_path": "named.yaml",
+            "target_host": "worker-a",
+            "job_name": "My custom job",
+            "submitted_by": "tiago@energaize.io",
+        },
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    jobs = api_client.get("/jobs").json()
+    target = next(item for item in jobs if item["job_id"] == job_id)
+    assert target["job_info"]["job_name"] == "My custom job"
+    assert target["job_info"]["submitted_by"] == "tiago@energaize.io"
+
+    queue = api_client.get("/queue").json()
+    queued = next(item for item in queue if item["job_id"] == job_id)
+    assert queued["submitted_by"] == "tiago@energaize.io"
+
+
+def test_job_resolved_config_endpoint(api_client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AVAILABLE_HOSTS", ["local"])
+
+    response = api_client.post(
+        "/run-simulation",
+        json={"config": {"metadata": {"experiment_name": "Cfg", "run_name": "Resolved"}}},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    resolved_path = Path(settings.JOBS_DIR) / job_id / "config.resolved.yaml"
+    resolved_path.write_text("metadata:\n  experiment_name: Cfg\n")
+
+    resolved_resp = api_client.get(f"/job-resolved-config/{job_id}")
+    assert resolved_resp.status_code == 200
+    assert "metadata:" in resolved_resp.text
+
+    info_resp = api_client.get(f"/job-info/{job_id}")
+    assert info_resp.status_code == 200
+    assert info_resp.json()["resolved_config_available"] is True
 
 
 def test_agent_job_status_updates_exit_code(api_client, monkeypatch):

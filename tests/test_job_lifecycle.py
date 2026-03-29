@@ -550,9 +550,11 @@ def test_list_queue_returns_entries(tmp_path, jobs_env):
     job_utils.enqueue_job(payload)
 
     entries = job_service.list_queue()
-    expected = dict(payload)
-    expected["require_host"] = True
-    assert entries == [expected]
+    assert len(entries) == 1
+    assert entries[0]["job_id"] == payload["job_id"]
+    assert entries[0]["preferred_host"] == payload["preferred_host"]
+    assert entries[0]["require_host"] is True
+    assert isinstance(entries[0].get("enqueued_at"), (int, float))
 
 
 def test_host_heartbeat_reporting(monkeypatch):

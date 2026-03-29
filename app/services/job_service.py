@@ -98,6 +98,53 @@ def _log_dir(job_id: str) -> str:
 def _log_path(job_id: str) -> str:
     return os.path.join(_log_dir(job_id), f"{job_id}.log")
 
+def _resolved_config_path(job_id: str) -> str:
+    return os.path.join(_job_dir(job_id), "config.resolved.yaml")
+
+
+def _read_job_info_payload(job_id: str) -> dict:
+    info_path = _info_path(job_id)
+    if not os.path.exists(info_path):
+        return {}
+    try:
+        with open(info_path) as handle:
+            payload = json.load(handle)
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _resolve_log_path(job_id: str) -> Optional[str]:
+    logs_dir = _log_dir(job_id)
+    if not os.path.isdir(logs_dir):
+        return None
+
+    info = _read_job_info_payload(job_id)
+    candidate_names: list[str] = []
+    for key in ("run_id", "mlflow_run_id"):
+        value = info.get(key)
+        if isinstance(value, str) and value.strip():
+            candidate_names.append(f"{value.strip()}.log")
+    candidate_names.append(f"{job_id}.log")
+
+    seen: set[str] = set()
+    for candidate_name in candidate_names:
+        if candidate_name in seen:
+            continue
+        seen.add(candidate_name)
+        candidate_path = os.path.join(logs_dir, candidate_name)
+        if os.path.isfile(candidate_path):
+            return candidate_path
+
+    log_candidates = [
+        entry for entry in Path(logs_dir).glob("*.log")
+        if entry.is_file()
+    ]
+    if log_candidates:
+        newest = max(log_candidates, key=lambda entry: entry.stat().st_mtime)
+        return str(newest)
+    return None
+
 def _container_name(job_id: str, job_name: str) -> str:
     safe_name = _slug(job_name)[:40]
     return f"{settings.CONTAINER_NAME_PREFIX}_{safe_name}_{job_id[:8]}"
@@ -310,6 +357,23 @@ def _build_mlflow_run_url(
     return f"{normalized}/#/experiments/{experiment_id}/runs/{run_id}"
 
 
+def _queue_payload(
+    *,
+    job_id: str,
+    preferred_host: str | None,
+    require_host: bool,
+    submitted_by: str | None = None,
+) -> dict:
+    payload: dict = {
+        "job_id": job_id,
+        "preferred_host": preferred_host,
+        "require_host": require_host,
+    }
+    if submitted_by:
+        payload["submitted_by"] = submitted_by
+    return payload
+
+
 def _enrich_job_info_with_mlflow_links(info: dict) -> dict:
     if not isinstance(info, dict):
         return info
@@ -450,11 +514,14 @@ def _mark_stale_jobs():
             preferred = meta.get("preferred_host") or meta.get("target_host")
             require_host = bool(meta.get("require_host", bool(preferred)))
             if status == JobStatus.DISPATCHED.value:
-                job_utils.enqueue_job({
-                    "job_id": job_id,
-                    "preferred_host": preferred,
-                    "require_host": require_host,
-                })
+                job_utils.enqueue_job(
+                    _queue_payload(
+                        job_id=job_id,
+                        preferred_host=preferred,
+                        require_host=require_host,
+                        submitted_by=meta.get("submitted_by"),
+                    )
+                )
                 meta["status"] = JobStatus.QUEUED.value
                 _persist_job(job_id, meta)
                 _write_status(
@@ -483,11 +550,14 @@ def _mark_stale_jobs():
         require_host = bool(meta.get("require_host", bool(preferred)))
         if status == JobStatus.DISPATCHED.value:
             # Put back in queue for another worker to pick up
-            job_utils.enqueue_job({
-                "job_id": job_id,
-                "preferred_host": preferred,
-                "require_host": require_host,
-            })
+            job_utils.enqueue_job(
+                _queue_payload(
+                    job_id=job_id,
+                    preferred_host=preferred,
+                    require_host=require_host,
+                    submitted_by=meta.get("submitted_by"),
+                )
+            )
             meta["status"] = JobStatus.QUEUED.value
             _persist_job(job_id, meta)
             _write_status(job_id, JobStatus.QUEUED.value, {"requeued_from": host, "preferred_host": preferred})
@@ -528,7 +598,9 @@ async def launch_simulation(request: JobLaunchRequest):
         raise HTTPException(400, "Missing config or config_path")
 
     experiment_name, run_name = _resolve_experiment_identity(config)
-    job_name = _slug(f"{experiment_name}-{run_name}")
+    requested_job_name = (request.job_name or "").strip()
+    job_name = requested_job_name or f"{experiment_name}-{run_name}"
+    submitted_by = (request.submitted_by or "").strip() or None
 
     if not config_path.startswith("configs/"):
         config_path = f"configs/{config_path}"
@@ -544,18 +616,31 @@ async def launch_simulation(request: JobLaunchRequest):
         "run_name": run_name,
         "status": JobStatus.LAUNCHING.value,
         "require_host": bool(preferred_host),
+        "submitted_by": submitted_by,
     }
     _persist_job(job_id, meta)
-    job_utils.save_job_info(job_id, job_name, config_path, preferred_host or "",
-                            container_id="", container_name="", exp=experiment_name, run=run_name)
+    job_utils.save_job_info(
+        job_id,
+        job_name,
+        config_path,
+        preferred_host or "",
+        container_id="",
+        container_name="",
+        exp=experiment_name,
+        run=run_name,
+        submitted_by=submitted_by,
+    )
     _write_status(job_id, JobStatus.LAUNCHING.value, {"preferred_host": preferred_host})
 
     # enqueue for agent (agent decides how to run the container)
-    job_utils.enqueue_job({
-        "job_id": job_id,
-        "preferred_host": preferred_host,
-        "require_host": bool(preferred_host),
-    })
+    job_utils.enqueue_job(
+        _queue_payload(
+            job_id=job_id,
+            preferred_host=preferred_host,
+            require_host=bool(preferred_host),
+            submitted_by=submitted_by,
+        )
+    )
     meta.update({"status": JobStatus.QUEUED.value})
     _persist_job(job_id, meta)
     _write_status(job_id, JobStatus.QUEUED.value, {"preferred_host": preferred_host})
@@ -588,26 +673,42 @@ def get_result(job_id: str):
 def get_progress(job_id: str):
     return file_utils.read_progress(job_id)
 
+def get_job_resolved_config(job_id: str) -> str:
+    path = _resolved_config_path(job_id)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Resolved config not found")
+    with open(path, "r", encoding="utf-8") as handle:
+        return handle.read()
+
 def _stream_file(path: str) -> Generator[str, None, None]:
     with open(path) as f:
         for line in f:
             yield line
 
 def get_file_logs(job_id: str):
-    path = _log_path(job_id)
-    if not os.path.exists(path):
+    path = _resolve_log_path(job_id)
+    if not path:
         raise HTTPException(404, "Log file not found")
     return _stream_file(path)
 
 def get_logs(job_id: str):
-    path = _log_path(job_id)
-    if os.path.exists(path):
+    path = _resolve_log_path(job_id)
+    if path and os.path.exists(path):
         return _stream_file(path)
-    jobs = job_utils.load_jobs()
+    _refresh_jobs()
     job = jobs.get(job_id)
-    if job and job.get("target_host") == "local" and job.get("container_id"):
+    if not job:
+        raise HTTPException(404, "Logs not available for this job")
+    status_now = _read_status_file(job_id) or job.get("status", JobStatus.UNKNOWN.value)
+    if status_now in {
+        JobStatus.LAUNCHING.value,
+        JobStatus.QUEUED.value,
+        JobStatus.DISPATCHED.value,
+        JobStatus.RUNNING.value,
+        JobStatus.STOP_REQUESTED.value,
+    }:
         def _msg():
-            yield "No file log yet; please check again shortly.\n"
+            yield "Logs not available yet. Job is still initializing or running.\n"
         return _msg()
     raise HTTPException(404, "Logs not available for this job")
 
@@ -654,17 +755,28 @@ def list_jobs():
     _mark_stale_jobs()
     result = []
     for job_id, job in jobs.items():
+        merged = dict(job)
+        merged["job_id"] = job_id
         info = {}
         ipath = _info_path(job_id)
         if os.path.exists(ipath):
             with open(ipath) as f:
                 info = json.load(f)
             info = _enrich_job_info_with_mlflow_links(info)
+        else:
+            info = {}
+
+        resolved_path = _resolved_config_path(job_id)
+        info.setdefault("resolved_config_available", os.path.isfile(resolved_path))
+        if info["resolved_config_available"]:
+            info.setdefault("resolved_config_file", "config.resolved.yaml")
+        info.setdefault("submitted_by", merged.get("submitted_by"))
+        info.setdefault("job_name", merged.get("job_name"))
+        info.setdefault("config_path", merged.get("config_path"))
+        info.setdefault("target_host", merged.get("target_host"))
 
         status_payload = get_status(job_id)
         status = status_payload["status"]
-        merged = dict(job)
-        merged["job_id"] = job_id
         merged["status"] = status
         if "config_path" in merged and not _is_yaml_filename(str(merged["config_path"])):
             # Keep backward compatibility but normalize config extension when legacy jobs exist.
@@ -695,7 +807,19 @@ def list_jobs():
 
 def list_queue():
     _mark_stale_jobs()
-    return job_utils.list_queue()
+    entries = job_utils.list_queue()
+    tracked = jobs if jobs else job_utils.load_jobs()
+    for entry in entries:
+        if entry.get("submitted_by"):
+            continue
+        job_id = entry.get("job_id")
+        if not job_id:
+            continue
+        meta = tracked.get(job_id) or {}
+        submitted_by = meta.get("submitted_by")
+        if submitted_by:
+            entry["submitted_by"] = submitted_by
+    return entries
 
 def get_job_info(job_id: str):
     _refresh_jobs()
@@ -705,7 +829,17 @@ def get_job_info(job_id: str):
         raise HTTPException(404, "Job info not found")
     with open(p) as f:
         info = json.load(f)
-    return _enrich_job_info_with_mlflow_links(info)
+    info = _enrich_job_info_with_mlflow_links(info)
+    resolved_path = _resolved_config_path(job_id)
+    info.setdefault("resolved_config_available", os.path.isfile(resolved_path))
+    if info["resolved_config_available"]:
+        info.setdefault("resolved_config_file", "config.resolved.yaml")
+    if not info.get("submitted_by"):
+        meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
+        submitted_by = meta.get("submitted_by")
+        if submitted_by:
+            info["submitted_by"] = submitted_by
+    return info
 
 def delete_job(job_id: str):
     _refresh_jobs()
@@ -759,11 +893,14 @@ def ops_requeue_job(
 
     prev_host = meta.get("target_host")
     job_utils.remove_from_queue(job_id)
-    job_utils.enqueue_job({
-        "job_id": job_id,
-        "preferred_host": preferred,
-        "require_host": require_host,
-    })
+    job_utils.enqueue_job(
+        _queue_payload(
+            job_id=job_id,
+            preferred_host=preferred,
+            require_host=require_host,
+            submitted_by=meta.get("submitted_by"),
+        )
+    )
 
     meta["status"] = JobStatus.QUEUED.value
     meta["preferred_host"] = preferred

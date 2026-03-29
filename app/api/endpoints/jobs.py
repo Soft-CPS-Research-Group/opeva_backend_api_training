@@ -50,6 +50,11 @@ async def delete_job(job_id: str):
 async def file_logs(job_id: str):
     return StreamingResponse(job_controller.get_file_logs(job_id), media_type="text/plain")
 
+@router.get("/job-resolved-config/{job_id}")
+async def job_resolved_config(job_id: str):
+    payload = job_controller.get_job_resolved_config(job_id)
+    return StreamingResponse(iter([payload]), media_type="text/yaml")
+
 @router.get("/hosts")
 def hosts():
     return job_controller.get_hosts()

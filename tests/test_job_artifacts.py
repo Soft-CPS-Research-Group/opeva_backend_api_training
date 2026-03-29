@@ -1,5 +1,7 @@
 import sys
 import json
+import time
+import os
 from pathlib import Path
 
 import pytest
@@ -61,3 +63,88 @@ def test_example_job_statuses(monkeypatch, tmp_path):
         assert status["status"] == expected_status
         prog = job_service.get_progress(job_id)
         assert prog["percent"] == expected_percent
+
+
+def _use_temp_job_dir(monkeypatch, tmp_path, job_id: str, status: str = JobStatus.RUNNING.value):
+    jobs_root = tmp_path / "jobs"
+    jobs_root.mkdir(parents=True, exist_ok=True)
+    queue_root = tmp_path / "queue"
+    queue_root.mkdir(parents=True, exist_ok=True)
+    job_track = tmp_path / "job_track.json"
+    job_track.write_text(
+        json.dumps(
+            {
+                job_id: {
+                    "job_id": job_id,
+                    "status": status,
+                    "target_host": "server",
+                }
+            }
+        )
+    )
+
+    monkeypatch.setattr(job_service.settings, "JOBS_DIR", str(jobs_root))
+    monkeypatch.setattr(job_service.settings, "QUEUE_DIR", str(queue_root))
+    monkeypatch.setattr(job_service.settings, "JOB_TRACK_FILE", str(job_track))
+    monkeypatch.setattr(file_utils.settings, "JOBS_DIR", str(jobs_root))
+    job_service.jobs.clear()
+    job_service.jobs.update(job_service.job_utils.load_jobs())
+    return jobs_root
+
+
+def test_get_file_logs_resolves_run_id_first(monkeypatch, tmp_path):
+    job_id = "job-run-id-log"
+    jobs_root = _use_temp_job_dir(monkeypatch, tmp_path, job_id, JobStatus.FINISHED.value)
+    logs_dir = jobs_root / job_id / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (jobs_root / job_id / "job_info.json").write_text(json.dumps({"run_id": "run-123"}))
+    (logs_dir / f"{job_id}.log").write_text("legacy-job-id-log\n")
+    (logs_dir / "run-123.log").write_text("run-id-log-line\n")
+
+    payload = "".join(job_service.get_file_logs(job_id))
+    assert "run-id-log-line" in payload
+    assert "legacy-job-id-log" not in payload
+
+
+def test_get_logs_resolves_mlflow_run_id(monkeypatch, tmp_path):
+    job_id = "job-mlflow-log"
+    jobs_root = _use_temp_job_dir(monkeypatch, tmp_path, job_id, JobStatus.FINISHED.value)
+    logs_dir = jobs_root / job_id / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (jobs_root / job_id / "job_info.json").write_text(json.dumps({"mlflow_run_id": "ml-456"}))
+    (logs_dir / "ml-456.log").write_text("mlflow-run-log\n")
+
+    payload = "".join(job_service.get_logs(job_id))
+    assert "mlflow-run-log" in payload
+
+
+def test_get_file_logs_falls_back_to_latest_log(monkeypatch, tmp_path):
+    job_id = "job-latest-log"
+    jobs_root = _use_temp_job_dir(monkeypatch, tmp_path, job_id, JobStatus.FINISHED.value)
+    logs_dir = jobs_root / job_id / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    older = logs_dir / "a.log"
+    newer = logs_dir / "b.log"
+    older.write_text("older\n")
+    newer.write_text("newer\n")
+    now = time.time()
+    older_ts = now - 10
+    newer_ts = now
+    older.touch()
+    newer.touch()
+    os.utime(older, (older_ts, older_ts))
+    os.utime(newer, (newer_ts, newer_ts))
+
+    payload = "".join(job_service.get_file_logs(job_id))
+    assert payload.strip() == "newer"
+
+
+def test_get_logs_active_job_without_file_returns_wait_message(monkeypatch, tmp_path):
+    job_id = "job-active-no-log"
+    jobs_root = _use_temp_job_dir(monkeypatch, tmp_path, job_id, JobStatus.RUNNING.value)
+    (jobs_root / job_id).mkdir(parents=True, exist_ok=True)
+    job_service.job_utils.write_status_file(job_id, JobStatus.RUNNING.value, {})
+
+    payload = "".join(job_service.get_logs(job_id))
+    assert "Logs not available yet" in payload

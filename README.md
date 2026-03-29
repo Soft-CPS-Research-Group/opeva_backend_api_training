@@ -260,6 +260,11 @@ Allowed transitions:
 
 Staleness is detected using `status_updated_at` (job heartbeats) and host heartbeats. See `JOB_STATUS_TTL`, `HOST_HEARTBEAT_TTL`, and `WORKER_STALE_GRACE_SECONDS` in `app/config.py`.
 
+Heartbeat cadence notes:
+- Worker heartbeat interval is configured on the worker side via `WORKER_HEARTBEAT_INTERVAL` (default `30s`).
+- Backend marks hosts offline after `HOST_HEARTBEAT_TTL` (default `60s`).
+- For a faster UI online/offline response profile, use `WORKER_HEARTBEAT_INTERVAL=15` and `HOST_HEARTBEAT_TTL=45`.
+
 ### Metadata JSONs
 `job_info.json` (written by the server, updated by the agent):
 ```json

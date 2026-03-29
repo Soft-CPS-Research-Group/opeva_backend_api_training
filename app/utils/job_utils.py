@@ -69,7 +69,19 @@ def save_job(job_id, metadata):
         jobs[job_id] = metadata
         _write_job_track_unlocked(jobs)
 
-def save_job_info(job_id, job_name, config_path, host, container_id, container_name, exp, run, ray_task_id=None):
+def save_job_info(
+    job_id,
+    job_name,
+    config_path,
+    host,
+    container_id,
+    container_name,
+    exp,
+    run,
+    ray_task_id=None,
+    *,
+    submitted_by: str | None = None,
+):
     job_dir = os.path.join(settings.JOBS_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
     info = {
@@ -84,6 +96,8 @@ def save_job_info(job_id, job_name, config_path, host, container_id, container_n
     }
     if ray_task_id is not None:
         info["ray_task_id"] = ray_task_id
+    if submitted_by:
+        info["submitted_by"] = submitted_by
     with open(os.path.join(job_dir, "job_info.json"), "w") as f:
         json.dump(info, f, indent=2)
 
@@ -154,7 +168,10 @@ def enqueue_job(payload: dict):
         "job_id": payload["job_id"],
         "preferred_host": payload.get("preferred_host"),
         "require_host": payload.get("require_host", bool(payload.get("preferred_host"))),
+        "enqueued_at": payload.get("enqueued_at") or time.time(),
     }
+    if payload.get("submitted_by"):
+        entry["submitted_by"] = payload["submitted_by"]
     with open(path, "w") as f:
         json.dump(entry, f, indent=2)
 
@@ -247,6 +264,8 @@ def list_queue() -> list[dict]:
             with open(path) as f:
                 payload = json.load(f)
             if isinstance(payload, dict):
+                payload.setdefault("job_id", os.path.basename(path).rsplit(".", 1)[0])
+                payload.setdefault("enqueued_at", os.path.getmtime(path))
                 entries.append(payload)
         except Exception:
             continue
