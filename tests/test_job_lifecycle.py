@@ -414,6 +414,32 @@ def test_agent_skips_jobs_for_other_hosts(monkeypatch):
     assert "--job_id" in dispatched["command"]
 
 
+def test_launch_with_custom_image_is_dispatched_to_worker():
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+    image = "calof/custom-simulator:v2"
+    result = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(
+                config={"experiment": {"name": "Image", "run_name": "Custom"}},
+                target_host="worker-a",
+                image=image,
+            )
+        )
+    )
+
+    job_id = result["job_id"]
+    assert result["image"] == image
+    assert job_service.jobs[job_id]["image"] == image
+
+    dispatched = job_service.agent_next_job("worker-a")
+    assert dispatched is not None
+    assert dispatched["job_id"] == job_id
+    assert dispatched["image"] == image
+
+    info = json.loads((Path(settings.JOBS_DIR) / job_id / "job_info.json").read_text())
+    assert info["image"] == image
+
+
 def test_deucalion_does_not_pick_unpinned_jobs():
     settings.AVAILABLE_HOSTS = ["worker-a", "deucalion"]
 
@@ -765,6 +791,47 @@ def test_mark_stale_running_fails(monkeypatch):
     assert track[job_id]["status"] == JobStatus.FAILED.value
 
 
+def test_mark_stale_deucalion_dispatched_pending_is_preserved(monkeypatch):
+    settings.AVAILABLE_HOSTS = ["deucalion"]
+    monkeypatch.setattr(settings, "JOB_STATUS_TTL", 1)
+    monkeypatch.setattr(settings, "DEUCALION_DISPATCH_STATUS_TTL", 1)
+
+    job_id = "job-deucalion-pending"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "deucalion",
+        "preferred_host": "deucalion",
+        "require_host": True,
+        "status": JobStatus.DISPATCHED.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    stale_ts = time.time() - 10
+    (job_dir / "status.json").write_text(
+        json.dumps(
+            {
+                "job_id": job_id,
+                "status": JobStatus.DISPATCHED.value,
+                "status_updated_at": stale_ts,
+                "details": {"slurm_state": "PENDING"},
+            }
+        )
+    )
+    job_service.host_heartbeats["deucalion"] = {
+        "last_seen": time.time(),
+        "info": {"active_job_id": job_id},
+    }
+
+    job_service._mark_stale_jobs()
+
+    status_data = json.loads((job_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.DISPATCHED.value
+    assert not (Path(settings.QUEUE_DIR) / f"{job_id}.json").exists()
+    track = json.loads(Path(settings.JOB_TRACK_FILE).read_text())
+    assert track[job_id]["status"] == JobStatus.DISPATCHED.value
+
+
 def test_ops_requeue_dispatched():
     settings.AVAILABLE_HOSTS = ["worker-a"]
     job_id = "job-ops-requeue"
@@ -854,6 +921,73 @@ def test_ops_fail_and_cancel():
     assert status_data["error"] == "ops_cancel"
     queue_file = Path(settings.QUEUE_DIR) / f"{cancel_id}.json"
     assert not queue_file.exists()
+
+
+def test_ops_requeue_failed_job_without_force():
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+    job_id = "job-ops-requeue-failed"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "preferred_host": "worker-a",
+        "status": JobStatus.FAILED.value,
+        "error": "boom",
+        "exit_code": 2,
+        "container_id": "cid-old",
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    job_utils.write_status_file(job_id, JobStatus.FAILED.value, {"error": "boom"})
+    (job_dir / "job_info.json").write_text(
+        json.dumps(
+            {
+                "job_id": job_id,
+                "job_name": "RetryMe",
+                "config_path": "configs/retry.yaml",
+                "target_host": "worker-a",
+                "container_id": "cid-old",
+                "error": "boom",
+            }
+        )
+    )
+
+    resp = job_service.ops_requeue_job(job_id)
+    assert resp["status"] == JobStatus.QUEUED.value
+
+    status_data = json.loads((job_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.QUEUED.value
+    queue_file = Path(settings.QUEUE_DIR) / f"{job_id}.json"
+    assert queue_file.exists()
+    refreshed = json.loads(Path(settings.JOB_TRACK_FILE).read_text())[job_id]
+    assert "error" not in refreshed
+    assert "container_id" not in refreshed
+
+    info = json.loads((job_dir / "job_info.json").read_text())
+    assert "error" not in info
+    assert "container_id" not in info
+
+
+def test_ops_stop_job_sets_reason():
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+    job_id = "job-ops-stop"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "worker-a",
+        "status": JobStatus.RUNNING.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    job_utils.write_status_file(job_id, JobStatus.RUNNING.value, {})
+
+    resp = job_service.ops_stop_job(job_id, reason="manual_stop")
+    assert resp["status"] == JobStatus.STOP_REQUESTED.value
+
+    status_data = json.loads((job_dir / "status.json").read_text())
+    assert status_data["status"] == JobStatus.STOP_REQUESTED.value
+    assert status_data["stop_reason"] == "manual_stop"
+    assert status_data["stopped_by_ops"] is True
 
 
 def test_ops_cleanup_queue_removes_orphans():

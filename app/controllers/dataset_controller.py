@@ -20,3 +20,7 @@ def delete_dataset(name: str):
 def download_dataset(name: str):
     file_path = dataset_service.get_dataset_file(name)
     return FileResponse(file_path, filename=os.path.basename(file_path))
+
+
+def upload_dataset(file_obj, source_filename: str, dataset_name: str | None = None):
+    return dataset_service.upload_dataset_archive(file_obj, source_filename, dataset_name)

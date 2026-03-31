@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from app.controllers import job_controller
 from app.models.job import JobLaunchRequest
@@ -58,3 +58,11 @@ async def job_resolved_config(job_id: str):
 @router.get("/hosts")
 def hosts():
     return job_controller.get_hosts()
+
+
+@router.get("/job-images/versions")
+async def job_image_versions(
+    repository: str | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=200),
+):
+    return job_controller.get_job_image_versions(repository, limit)

@@ -4,6 +4,9 @@ from uuid import uuid4
 from typing import Generator, Optional
 from pathlib import Path
 from fastapi import HTTPException
+from urllib import request as urllib_request
+from urllib import parse as urllib_parse
+from urllib import error as urllib_error
 
 from app.config import settings
 from app.models.job import JobLaunchRequest
@@ -42,6 +45,39 @@ DEFAULT_JOB_CLEANUP_KEEP = {
     "failed_job",
     "queued_job",
 }
+
+RUNTIME_RESET_FIELDS = {
+    "container_id",
+    "container_name",
+    "exit_code",
+    "error",
+    "details",
+    "stop_requested",
+    "stop_requested_at",
+    "worker_id",
+    "last_host",
+}
+
+JOB_INFO_RUNTIME_RESET_FIELDS = {
+    "container_id",
+    "container_name",
+    "exit_code",
+    "error",
+    "details",
+    "target_host",
+}
+
+DEUCALION_SLURM_ACTIVE_STATES = {
+    "PENDING",
+    "CONFIGURING",
+    "COMPLETING",
+    "RUNNING",
+    "STAGE_OUT",
+    "RESIZING",
+    "SUSPENDED",
+}
+
+_image_versions_cache: dict[str, dict] = {}
 
 
 def _ensure_float(value) -> float | None:
@@ -320,6 +356,184 @@ def _safe_filename(value: str) -> str:
     return cleaned
 
 
+def _normalize_job_image(value: Optional[str]) -> str:
+    if value is None:
+        return settings.DEFAULT_JOB_IMAGE
+    image = str(value).strip()
+    if not image:
+        return settings.DEFAULT_JOB_IMAGE
+    if len(image) > 512:
+        raise HTTPException(400, "Job image is too long")
+    if any(ch.isspace() for ch in image):
+        raise HTTPException(400, "Invalid job image")
+    return image
+
+
+def _normalize_image_repository(value: Optional[str]) -> str:
+    repo = (value or settings.JOB_IMAGE_REPOSITORY or "").strip().strip("/")
+    if not repo:
+        raise HTTPException(400, "Image repository is required")
+    parts = [part for part in repo.split("/") if part]
+    if len(parts) == 1:
+        namespace, name = "library", parts[0]
+    elif len(parts) == 2:
+        namespace, name = parts
+    else:
+        raise HTTPException(400, "Repository must be '<namespace>/<name>'")
+    token = re.compile(r"^[a-z0-9]+([._-][a-z0-9]+)*$")
+    if not token.fullmatch(namespace) or not token.fullmatch(name):
+        raise HTTPException(400, "Invalid Docker Hub repository format")
+    return f"{namespace}/{name}"
+
+
+def _dockerhub_tag_digest(raw: dict) -> str | None:
+    if not isinstance(raw, dict):
+        return None
+    images = raw.get("images")
+    if not isinstance(images, list):
+        return None
+    for item in images:
+        if isinstance(item, dict):
+            digest = item.get("digest")
+            if isinstance(digest, str) and digest:
+                return digest
+    return None
+
+
+def list_job_image_versions(repository: Optional[str] = None, limit: Optional[int] = None) -> dict:
+    repo = _normalize_image_repository(repository)
+    max_tags = int(limit or settings.JOB_IMAGE_TAGS_LIMIT)
+    max_tags = max(1, min(max_tags, 200))
+    cache_key = f"{repo}:{max_tags}"
+    now = time.time()
+    ttl = max(0, int(settings.JOB_IMAGE_CATALOG_TTL_SECONDS))
+
+    cached = _image_versions_cache.get(cache_key)
+    if cached and (now - cached.get("fetched_at", 0.0)) < ttl:
+        return {
+            "repository": repo,
+            "tags": cached["tags"],
+            "count": len(cached["tags"]),
+            "cached": True,
+            "fetched_at": cached["fetched_at"],
+        }
+
+    namespace, name = repo.split("/", 1)
+    next_url = (
+        "https://hub.docker.com/v2/repositories/"
+        f"{urllib_parse.quote(namespace)}/{urllib_parse.quote(name)}"
+        f"/tags?page_size={min(max_tags, 100)}"
+    )
+    tags: list[dict] = []
+    timeout_seconds = max(1, int(settings.JOB_IMAGE_CATALOG_TIMEOUT_SECONDS))
+    while next_url and len(tags) < max_tags:
+        req = urllib_request.Request(next_url, headers={"Accept": "application/json"})
+        try:
+            with urllib_request.urlopen(req, timeout=timeout_seconds) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib_error.HTTPError as exc:
+            if exc.code == 404:
+                raise HTTPException(404, f"Docker Hub repository not found: {repo}")
+            raise HTTPException(502, f"Failed to fetch Docker Hub tags for {repo} (status={exc.code})")
+        except Exception as exc:
+            raise HTTPException(502, f"Failed to fetch Docker Hub tags for {repo}: {exc}")
+
+        results = payload.get("results")
+        if not isinstance(results, list):
+            break
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            tag_name = item.get("name")
+            if not isinstance(tag_name, str) or not tag_name:
+                continue
+            tags.append(
+                {
+                    "name": tag_name,
+                    "last_updated": item.get("last_updated"),
+                    "digest": _dockerhub_tag_digest(item),
+                }
+            )
+            if len(tags) >= max_tags:
+                break
+
+        raw_next = payload.get("next")
+        next_url = raw_next if isinstance(raw_next, str) and raw_next else None
+
+    fetched_at = time.time()
+    _image_versions_cache[cache_key] = {"tags": tags, "fetched_at": fetched_at}
+    return {
+        "repository": repo,
+        "tags": tags,
+        "count": len(tags),
+        "cached": False,
+        "fetched_at": fetched_at,
+    }
+
+
+def _status_stale_ttl(meta: dict, status: str) -> int:
+    ttl = int(settings.JOB_STATUS_TTL)
+    host = str(meta.get("target_host") or meta.get("preferred_host") or "")
+    if status == JobStatus.DISPATCHED.value and host == "deucalion":
+        ttl = max(ttl, int(settings.DEUCALION_DISPATCH_STATUS_TTL))
+    return ttl
+
+
+def _should_preserve_deucalion_dispatched(job_id: str, meta: dict, now_ts: float) -> bool:
+    host = str(meta.get("target_host") or meta.get("preferred_host") or "")
+    if host != "deucalion":
+        return False
+
+    payload = _read_status_payload(job_id) or {}
+    details = payload.get("details")
+    if not isinstance(details, dict):
+        details = {}
+
+    slurm_state = details.get("slurm_state")
+    if not isinstance(slurm_state, str) or slurm_state.strip().upper() not in DEUCALION_SLURM_ACTIVE_STATES:
+        return False
+
+    hb = host_heartbeats.get("deucalion")
+    if not hb:
+        return False
+    last_seen = hb.get("last_seen")
+    if not isinstance(last_seen, (int, float)):
+        return False
+    cutoff = settings.HOST_HEARTBEAT_TTL + settings.WORKER_STALE_GRACE_SECONDS
+    if (now_ts - float(last_seen)) > cutoff:
+        return False
+
+    info = hb.get("info")
+    if isinstance(info, dict):
+        active_job_id = info.get("active_job_id")
+        if active_job_id and active_job_id != job_id:
+            return False
+
+    return True
+
+
+def _reset_runtime_metadata(job_id: str, meta: dict) -> dict:
+    cleaned = dict(meta)
+    for key in RUNTIME_RESET_FIELDS:
+        cleaned.pop(key, None)
+
+    info = _read_job_info_payload(job_id)
+    if info:
+        changed = False
+        for key in JOB_INFO_RUNTIME_RESET_FIELDS:
+            if key in info:
+                info.pop(key, None)
+                changed = True
+        if changed:
+            try:
+                with open(_info_path(job_id), "w") as f:
+                    json.dump(info, f, indent=2)
+            except Exception:
+                _LOGGER.warning("Failed to reset job_info runtime metadata for %s", job_id, exc_info=True)
+
+    return cleaned
+
+
 def _resolve_experiment_identity(config: dict) -> tuple[str, str]:
     metadata = config.get("metadata", {}) if isinstance(config, dict) else {}
     if not isinstance(metadata, dict):
@@ -509,33 +723,40 @@ def _mark_stale_jobs():
         if status not in (JobStatus.DISPATCHED.value, JobStatus.RUNNING.value, JobStatus.STOP_REQUESTED.value):
             continue
 
+        status_ttl = _status_stale_ttl(meta, status)
         last_update = _status_last_update(job_id)
-        if last_update and (now - last_update) > settings.JOB_STATUS_TTL:
-            preferred = meta.get("preferred_host") or meta.get("target_host")
-            require_host = bool(meta.get("require_host", bool(preferred)))
-            if status == JobStatus.DISPATCHED.value:
-                job_utils.enqueue_job(
-                    _queue_payload(
-                        job_id=job_id,
-                        preferred_host=preferred,
-                        require_host=require_host,
-                        submitted_by=meta.get("submitted_by"),
-                    )
-                )
-                meta["status"] = JobStatus.QUEUED.value
-                _persist_job(job_id, meta)
-                _write_status(
+        if last_update and (now - last_update) > status_ttl:
+            if status == JobStatus.DISPATCHED.value and _should_preserve_deucalion_dispatched(job_id, meta, now):
+                _LOGGER.info(
+                    "Keeping dispatched Deucalion job %s while Slurm state is active",
                     job_id,
-                    JobStatus.QUEUED.value,
-                    {"requeued_from": host, "preferred_host": preferred, "stale_status": True},
                 )
-                _LOGGER.warning("Re-queued dispatched job %s due to stale status update", job_id)
             else:
-                _write_status(job_id, JobStatus.FAILED.value, {"error": "stale_status", "last_host": host})
-                meta["status"] = JobStatus.FAILED.value
-                _persist_job(job_id, meta)
-                _LOGGER.warning("Marked job %s as failed due to stale status update", job_id)
-            continue
+                preferred = meta.get("preferred_host") or meta.get("target_host")
+                require_host = bool(meta.get("require_host", bool(preferred)))
+                if status == JobStatus.DISPATCHED.value:
+                    job_utils.enqueue_job(
+                        _queue_payload(
+                            job_id=job_id,
+                            preferred_host=preferred,
+                            require_host=require_host,
+                            submitted_by=meta.get("submitted_by"),
+                        )
+                    )
+                    meta["status"] = JobStatus.QUEUED.value
+                    _persist_job(job_id, meta)
+                    _write_status(
+                        job_id,
+                        JobStatus.QUEUED.value,
+                        {"requeued_from": host, "preferred_host": preferred, "stale_status": True},
+                    )
+                    _LOGGER.warning("Re-queued dispatched job %s due to stale status update", job_id)
+                else:
+                    _write_status(job_id, JobStatus.FAILED.value, {"error": "stale_status", "last_host": host})
+                    meta["status"] = JobStatus.FAILED.value
+                    _persist_job(job_id, meta)
+                    _LOGGER.warning("Marked job %s as failed due to stale status update", job_id)
+                continue
 
         if not host:
             continue
@@ -601,6 +822,7 @@ async def launch_simulation(request: JobLaunchRequest):
     requested_job_name = (request.job_name or "").strip()
     job_name = requested_job_name or f"{experiment_name}-{run_name}"
     submitted_by = (request.submitted_by or "").strip() or None
+    job_image = _normalize_job_image(request.image)
 
     if not config_path.startswith("configs/"):
         config_path = f"configs/{config_path}"
@@ -617,6 +839,7 @@ async def launch_simulation(request: JobLaunchRequest):
         "status": JobStatus.LAUNCHING.value,
         "require_host": bool(preferred_host),
         "submitted_by": submitted_by,
+        "image": job_image,
     }
     _persist_job(job_id, meta)
     job_utils.save_job_info(
@@ -629,6 +852,7 @@ async def launch_simulation(request: JobLaunchRequest):
         exp=experiment_name,
         run=run_name,
         submitted_by=submitted_by,
+        image=job_image,
     )
     _write_status(job_id, JobStatus.LAUNCHING.value, {"preferred_host": preferred_host})
 
@@ -644,7 +868,13 @@ async def launch_simulation(request: JobLaunchRequest):
     meta.update({"status": JobStatus.QUEUED.value})
     _persist_job(job_id, meta)
     _write_status(job_id, JobStatus.QUEUED.value, {"preferred_host": preferred_host})
-    return {"job_id": job_id, "status": JobStatus.QUEUED.value, "host": preferred_host, "job_name": job_name}
+    return {
+        "job_id": job_id,
+        "status": JobStatus.QUEUED.value,
+        "host": preferred_host,
+        "job_name": job_name,
+        "image": job_image,
+    }
 
 # ---------- API: status/result/progress/logs ----------
 
@@ -713,7 +943,7 @@ def get_logs(job_id: str):
     raise HTTPException(404, "Logs not available for this job")
 
 # ---------- API: stop/list/info/delete/hosts ----------
-def stop_job(job_id: str):
+def stop_job(job_id: str, reason: str = "stop_requested", requested_by_ops: bool = False):
     _refresh_jobs()
     job = jobs.get(job_id)
     if not job:
@@ -724,14 +954,20 @@ def stop_job(job_id: str):
     job_utils.remove_from_queue(job_id)
 
     if status_now in (JobStatus.LAUNCHING.value, JobStatus.QUEUED.value):
-        _write_status(job_id, JobStatus.CANCELED.value)
+        extra = {"error": reason}
+        if requested_by_ops:
+            extra["canceled_by_ops"] = True
+        _write_status(job_id, JobStatus.CANCELED.value, extra)
         if job_id in jobs:
             jobs[job_id]["status"] = JobStatus.CANCELED.value
             _persist_job(job_id, jobs[job_id])
         return {"message": "Job canceled from queue"}
 
     if status_now in (JobStatus.DISPATCHED.value, JobStatus.RUNNING.value):
-        _write_status(job_id, JobStatus.STOP_REQUESTED.value, {"stop_requested": True})
+        extra = {"stop_requested": True, "stop_reason": reason}
+        if requested_by_ops:
+            extra["stopped_by_ops"] = True
+        _write_status(job_id, JobStatus.STOP_REQUESTED.value, extra)
         if job_id in jobs:
             jobs[job_id]["status"] = JobStatus.STOP_REQUESTED.value
             _persist_job(job_id, jobs[job_id])
@@ -774,6 +1010,7 @@ def list_jobs():
         info.setdefault("job_name", merged.get("job_name"))
         info.setdefault("config_path", merged.get("config_path"))
         info.setdefault("target_host", merged.get("target_host"))
+        info.setdefault("image", merged.get("image") or settings.DEFAULT_JOB_IMAGE)
 
         status_payload = get_status(job_id)
         status = status_payload["status"]
@@ -839,6 +1076,9 @@ def get_job_info(job_id: str):
         submitted_by = meta.get("submitted_by")
         if submitted_by:
             info["submitted_by"] = submitted_by
+    if not info.get("image"):
+        meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
+        info["image"] = meta.get("image") or settings.DEFAULT_JOB_IMAGE
     return info
 
 def delete_job(job_id: str):
@@ -881,17 +1121,13 @@ def ops_requeue_job(
         require_host = bool(meta.get("require_host", bool(preferred)))
 
     if not force:
-        if status_now in (
-            JobStatus.FINISHED.value,
-            JobStatus.FAILED.value,
-            JobStatus.STOPPED.value,
-            JobStatus.CANCELED.value,
-        ):
-            raise HTTPException(409, f"Job already terminal ({status_now}); use force to requeue")
+        if status_now == JobStatus.FINISHED.value:
+            raise HTTPException(409, "Finished jobs require force to requeue")
         if status_now in (JobStatus.RUNNING.value, JobStatus.STOP_REQUESTED.value):
-            raise HTTPException(409, f"Job is {status_now}; use force to requeue")
+            raise HTTPException(409, f"Job is {status_now}; stop it first or use force to requeue")
 
     prev_host = meta.get("target_host")
+    meta = _reset_runtime_metadata(job_id, meta)
     job_utils.remove_from_queue(job_id)
     job_utils.enqueue_job(
         _queue_payload(
@@ -914,7 +1150,13 @@ def ops_requeue_job(
         "requeued_from": prev_host,
         "preferred_host": preferred,
     }
-    if force:
+    requires_forced_transition = force or status_now in {
+        JobStatus.FINISHED.value,
+        JobStatus.FAILED.value,
+        JobStatus.STOPPED.value,
+        JobStatus.CANCELED.value,
+    }
+    if requires_forced_transition:
         _force_status(job_id, JobStatus.QUEUED.value, extra)
     else:
         _write_status(job_id, JobStatus.QUEUED.value, extra)
@@ -945,7 +1187,12 @@ def ops_fail_job(job_id: str, reason: str = "ops_failed", force: bool = False):
     meta["error"] = reason
     _persist_job(job_id, meta)
 
-    extra = {"error": reason, "failed_by_ops": True, "force": force}
+    extra = {
+        "error": reason,
+        "failed_by_ops": True,
+        "force": force,
+        "terminate_requested": status_now in ACTIVE_JOB_STATUSES,
+    }
     if force:
         _force_status(job_id, JobStatus.FAILED.value, extra)
     else:
@@ -981,6 +1228,18 @@ def ops_cancel_job(job_id: str, reason: str = "ops_canceled", force: bool = Fals
         _write_status(job_id, JobStatus.CANCELED.value, extra)
 
     return {"message": "Job canceled", "job_id": job_id, "status": JobStatus.CANCELED.value}
+
+
+def ops_stop_job(job_id: str, reason: str = "ops_stop"):
+    _refresh_jobs()
+    if not _job_exists(job_id):
+        raise HTTPException(404, f"Job {job_id} not found")
+
+    response = stop_job(job_id, reason=reason, requested_by_ops=True)
+    status_now = _read_status_file(job_id) or (jobs.get(job_id) or {}).get("status", JobStatus.UNKNOWN.value)
+
+    response.update({"job_id": job_id, "status": status_now})
+    return response
 
 
 def ops_cleanup_queue(force: bool = False) -> dict:
@@ -1094,7 +1353,7 @@ def agent_next_job(worker_id: str):
         "job_name": job_name,
         "config_path": config_path,
         "preferred_host": job_queue_entry.get("preferred_host"),
-        "image": settings.DEFAULT_JOB_IMAGE,
+        "image": _normalize_job_image(meta.get("image")),
         "command": command,
         "container_name": container_name,
         "volumes": [{
@@ -1129,6 +1388,8 @@ def agent_next_job(worker_id: str):
         info["job_name"] = job_name
     if "config_path" not in info:
         info["config_path"] = config_path
+    if "image" not in info:
+        info["image"] = response["image"]
     with open(info_path, "w") as f:
         json.dump(info, f, indent=2)
 

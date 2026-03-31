@@ -1,4 +1,4 @@
-import os, json, yaml, base64
+import os, json, yaml, base64, re, zipfile
 import tempfile
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -650,6 +650,95 @@ def list_available_datasets():
 
         datasets.append({"name": name, "description": description})
     return datasets
+
+
+def _safe_dataset_name(name: str) -> str:
+    candidate = os.path.basename(str(name or "").strip())
+    if not candidate:
+        raise ValueError("Dataset name is required")
+    if len(candidate) > 128:
+        raise ValueError("Dataset name is too long")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", candidate):
+        raise ValueError("Dataset name contains invalid characters")
+    return candidate
+
+
+def _is_safe_zip_member(member_name: str) -> bool:
+    normalized = os.path.normpath(member_name).replace("\\", "/")
+    if normalized.startswith("../") or normalized.startswith("/"):
+        return False
+    if "/../" in normalized:
+        return False
+    return normalized not in {"", ".", ".."}
+
+
+def upload_dataset_archive(file_obj, source_filename: str, dataset_name: str | None = None) -> dict:
+    if not source_filename.lower().endswith(".zip"):
+        raise ValueError("Only .zip dataset uploads are supported")
+
+    inferred_name = os.path.splitext(os.path.basename(source_filename))[0]
+    safe_name = _safe_dataset_name(dataset_name or inferred_name)
+    os.makedirs(settings.DATASETS_DIR, exist_ok=True)
+    target_path = os.path.join(settings.DATASETS_DIR, safe_name)
+    if os.path.exists(target_path):
+        raise FileExistsError(f"Dataset '{safe_name}' already exists")
+
+    fd, tmp_zip_path = tempfile.mkstemp(prefix="dataset_upload_", suffix=".zip")
+    os.close(fd)
+    extract_root = tempfile.mkdtemp(prefix="dataset_extract_")
+    try:
+        with open(tmp_zip_path, "wb") as tmp_file:
+            shutil.copyfileobj(file_obj, tmp_file)
+
+        with zipfile.ZipFile(tmp_zip_path) as archive:
+            members = archive.infolist()
+            if not members:
+                raise ValueError("Uploaded ZIP is empty")
+            for member in members:
+                if not _is_safe_zip_member(member.filename):
+                    raise ValueError("ZIP contains unsafe file paths")
+            archive.extractall(extract_root)
+
+        extracted_entries = [
+            os.path.join(extract_root, name)
+            for name in os.listdir(extract_root)
+        ]
+        if not extracted_entries:
+            raise ValueError("Uploaded ZIP does not contain files")
+
+        # If the archive already contains a root dataset folder, preserve its contents.
+        if len(extracted_entries) == 1 and os.path.isdir(extracted_entries[0]):
+            shutil.move(extracted_entries[0], target_path)
+        else:
+            os.makedirs(target_path, exist_ok=True)
+            for entry in extracted_entries:
+                shutil.move(entry, os.path.join(target_path, os.path.basename(entry)))
+
+        metadata = {
+            "name": safe_name,
+            "description": "Uploaded dataset",
+            "uploaded_from": source_filename,
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with open(os.path.join(target_path, "upload_metadata.json"), "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
+        return {
+            "name": safe_name,
+            "path": target_path,
+            "size_bytes": _get_path_size(target_path),
+        }
+    except Exception:
+        if os.path.exists(target_path):
+            shutil.rmtree(target_path, ignore_errors=True)
+        raise
+    finally:
+        try:
+            if os.path.exists(tmp_zip_path):
+                os.remove(tmp_zip_path)
+        except OSError:
+            pass
+        shutil.rmtree(extract_root, ignore_errors=True)
 
 
 def get_dataset_file(name: str) -> str:

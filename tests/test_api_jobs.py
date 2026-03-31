@@ -1,4 +1,6 @@
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -209,6 +211,32 @@ def test_run_simulation_allows_job_name_and_submitted_by(api_client, monkeypatch
     assert queued["submitted_by"] == "tiago@energaize.io"
 
 
+def test_run_simulation_accepts_custom_image(api_client, monkeypatch):
+    from app.config import settings
+    from app.services import job_service
+
+    monkeypatch.setattr(settings, "AVAILABLE_HOSTS", ["worker-a"])
+    image = "calof/alt-image:2026.03"
+    response = api_client.post(
+        "/run-simulation",
+        json={
+            "config": {"experiment": {"name": "Image", "run_name": "API"}},
+            "target_host": "worker-a",
+            "image": image,
+        },
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    assert response.json()["image"] == image
+
+    dispatched = job_service.agent_next_job("worker-a")
+    assert dispatched is not None
+    assert dispatched["image"] == image
+
+    info = api_client.get(f"/job-info/{job_id}").json()
+    assert info["image"] == image
+
+
 def test_job_resolved_config_endpoint(api_client, monkeypatch):
     from app.config import settings
 
@@ -319,6 +347,41 @@ def test_stop_job_marks_stop_requested(api_client, monkeypatch):
     assert status_resp["status"] == JobStatus.STOP_REQUESTED.value
 
 
+def test_ops_stop_endpoint(api_client, monkeypatch):
+    from app.config import settings
+    from app.services import job_service
+    from app.status import JobStatus
+
+    monkeypatch.setattr(settings, "AVAILABLE_HOSTS", ["worker-a"])
+
+    response = api_client.post(
+        "/run-simulation",
+        json={"config": {"experiment": {"name": "Ops", "run_name": "Stop"}}, "target_host": "worker-a"},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    dispatched = job_service.agent_next_job("worker-a")
+    assert dispatched is not None
+
+    running = api_client.post(
+        "/api/agent/job-status",
+        json={"job_id": job_id, "status": JobStatus.RUNNING.value, "worker_id": "worker-a"},
+    )
+    assert running.status_code == 200
+
+    stop_resp = api_client.post(f"/ops/jobs/{job_id}/stop", json={"reason": "ops_manual_stop"})
+    assert stop_resp.status_code == 200
+    payload = stop_resp.json()
+    assert payload["status"] == JobStatus.STOP_REQUESTED.value
+
+    status_resp = api_client.get(f"/status/{job_id}")
+    assert status_resp.status_code == 200
+    status_payload = status_resp.json()
+    assert status_payload["status"] == JobStatus.STOP_REQUESTED.value
+    assert status_payload["stop_reason"] == "ops_manual_stop"
+
+
 def test_ops_requeue_endpoint(api_client, monkeypatch):
     from app.config import settings
     from app.services import job_service
@@ -410,3 +473,48 @@ def test_hosts_include_active_job_ids_and_current_job(api_client, monkeypatch):
     assert row["current_job_id"] == job_id
     assert row["current_job_status"] == "running"
     assert "info" in row
+
+
+def test_dataset_upload_endpoint(api_client):
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("dataset/file.csv", "col\n1\n")
+    payload.seek(0)
+
+    response = api_client.post(
+        "/dataset/upload",
+        files={"file": ("sample.zip", payload.getvalue(), "application/zip")},
+        data={"name": "uploaded_dataset"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["message"] == "Dataset uploaded"
+    assert body["name"] == "uploaded_dataset"
+
+    datasets = api_client.get("/datasets")
+    assert datasets.status_code == 200
+    dataset_names = {item["name"] for item in datasets.json()}
+    assert "uploaded_dataset" in dataset_names
+
+
+def test_job_image_versions_endpoint(api_client, monkeypatch):
+    from app.services import job_service
+
+    monkeypatch.setattr(
+        job_service,
+        "list_job_image_versions",
+        lambda repository=None, limit=None: {
+            "repository": repository or "calof/algorithms",
+            "tags": [{"name": "v1.2.3", "last_updated": "2026-03-31T10:00:00Z", "digest": "sha256:abc"}],
+            "count": 1,
+            "cached": False,
+            "fetched_at": 1_710_000_000.0,
+        },
+    )
+
+    resp = api_client.get("/job-images/versions", params={"repository": "calof/algorithms", "limit": 20})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["repository"] == "calof/algorithms"
+    assert payload["count"] == 1
+    assert payload["tags"][0]["name"] == "v1.2.3"

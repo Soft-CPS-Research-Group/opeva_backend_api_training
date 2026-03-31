@@ -24,6 +24,11 @@ def cancel_job(job_id: str, reason: str = Body("ops_canceled"), force: bool = Bo
     return ops_controller.cancel_job(job_id, reason, force)
 
 
+@router.post("/ops/jobs/{job_id}/stop")
+def stop_job(job_id: str, reason: str = Body("ops_stop", embed=True)):
+    return ops_controller.stop_job(job_id, reason)
+
+
 @router.post("/ops/queue/cleanup")
 def cleanup_queue(force: bool = Body(False, embed=True)):
     return ops_controller.cleanup_queue(force)

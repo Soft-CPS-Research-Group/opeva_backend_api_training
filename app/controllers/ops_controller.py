@@ -29,6 +29,15 @@ def cancel_job(job_id: str, reason: str = "ops_canceled", force: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def stop_job(job_id: str, reason: str = "ops_stop"):
+    try:
+        return job_service.ops_stop_job(job_id, reason)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def cleanup_queue(force: bool = False):
     return job_service.ops_cleanup_queue(force)
 

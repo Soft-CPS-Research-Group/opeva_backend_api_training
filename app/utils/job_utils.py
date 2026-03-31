@@ -81,6 +81,7 @@ def save_job_info(
     ray_task_id=None,
     *,
     submitted_by: str | None = None,
+    image: str | None = None,
 ):
     job_dir = os.path.join(settings.JOBS_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
@@ -98,6 +99,8 @@ def save_job_info(
         info["ray_task_id"] = ray_task_id
     if submitted_by:
         info["submitted_by"] = submitted_by
+    if image:
+        info["image"] = image
     with open(os.path.join(job_dir, "job_info.json"), "w") as f:
         json.dump(info, f, indent=2)
 

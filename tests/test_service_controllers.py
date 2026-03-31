@@ -98,6 +98,21 @@ def test_dataset_service_create_calls_file_utils(monkeypatch):
     assert called["args"][0] == "ds1"
 
 
+def test_dataset_service_upload_calls_file_utils(monkeypatch):
+    called = {}
+
+    def fake_upload(file_obj, source_filename, dataset_name=None):
+        called["args"] = (file_obj, source_filename, dataset_name)
+        return {"name": "uploaded", "size_bytes": 99}
+
+    monkeypatch.setattr(file_utils, "upload_dataset_archive", fake_upload)
+
+    payload = dataset_service.upload_dataset_archive(object(), "sample.zip", "uploaded")
+    assert payload["message"] == "Dataset uploaded"
+    assert payload["name"] == "uploaded"
+    assert called["args"][1] == "sample.zip"
+
+
 def test_dataset_controller_passthrough(monkeypatch):
     monkeypatch.setattr(dataset_service, "list_datasets", lambda: [{"name": "a"}])
     assert dataset_controller.list_datasets()[0]["name"] == "a"
@@ -110,6 +125,18 @@ def test_dataset_controller_passthrough(monkeypatch):
     monkeypatch.setattr(dataset_service, "get_dataset_file", lambda name: str(download_path))
     resp = dataset_controller.download_dataset("a")
     assert resp.path == str(download_path)
+
+    monkeypatch.setattr(
+        dataset_service,
+        "upload_dataset_archive",
+        lambda file_obj, source_filename, dataset_name=None: {
+            "message": "Dataset uploaded",
+            "name": dataset_name or "x",
+            "size_bytes": 10,
+        },
+    )
+    upload_resp = dataset_controller.upload_dataset(object(), "a.zip", "imported")
+    assert upload_resp["name"] == "imported"
 
 
 def test_mongo_service_lists_energy_communities(monkeypatch):

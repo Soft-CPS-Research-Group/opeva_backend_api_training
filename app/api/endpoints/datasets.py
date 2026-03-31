@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, File, Form, UploadFile
 from app.controllers import dataset_controller
 from typing import Optional
 
@@ -29,6 +29,21 @@ async def download_dataset(name: str):
         return dataset_controller.download_dataset(name)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Dataset not found")
+
+
+@router.post("/dataset/upload")
+async def upload_dataset(
+    file: UploadFile = File(...),
+    name: Optional[str] = Form(None),
+):
+    try:
+        return dataset_controller.upload_dataset(file.file, file.filename or "dataset.zip", name)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        await file.close()
 
 @router.delete("/dataset/{name}")
 async def delete_dataset(name: str):

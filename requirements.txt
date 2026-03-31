@@ -11,3 +11,4 @@ numpy
 pandas
 pytest>=7.0
 httpx>=0.27
+python-multipart

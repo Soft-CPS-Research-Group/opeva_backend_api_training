@@ -1,4 +1,7 @@
 import os
+import io
+import json
+import zipfile
 import importlib
 import pytest
 import sys
@@ -66,3 +69,33 @@ def test_get_dataset_file_zips_directory(dataset_env):
     assert archive_path.endswith(".zip")
     assert os.path.exists(archive_path)
     os.remove(archive_path)
+
+
+def test_upload_dataset_archive_extracts_zip(dataset_env):
+    file_utils, settings = dataset_env
+    os.makedirs(settings.DATASETS_DIR, exist_ok=True)
+
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("site/input.csv", "a,b\n1,2\n")
+    payload.seek(0)
+
+    result = file_utils.upload_dataset_archive(payload, "site.zip", "uploaded_ds")
+    assert result["name"] == "uploaded_ds"
+    extracted_file = Path(settings.DATASETS_DIR) / "uploaded_ds" / "input.csv"
+    assert extracted_file.exists()
+    metadata = json.loads((Path(settings.DATASETS_DIR) / "uploaded_ds" / "upload_metadata.json").read_text())
+    assert metadata["uploaded_from"] == "site.zip"
+
+
+def test_upload_dataset_archive_rejects_unsafe_paths(dataset_env):
+    file_utils, settings = dataset_env
+    os.makedirs(settings.DATASETS_DIR, exist_ok=True)
+
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("../evil.txt", "bad")
+    payload.seek(0)
+
+    with pytest.raises(ValueError):
+        file_utils.upload_dataset_archive(payload, "unsafe.zip", "unsafe_ds")

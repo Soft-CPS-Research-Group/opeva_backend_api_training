@@ -19,3 +19,12 @@ def delete_dataset(name: str):
 
 def get_dataset_file(name: str) -> str:
     return file_utils.get_dataset_file(name)
+
+
+def upload_dataset_archive(file_obj, source_filename: str, dataset_name: str | None = None):
+    payload = file_utils.upload_dataset_archive(file_obj, source_filename, dataset_name)
+    return {
+        "message": "Dataset uploaded",
+        "name": payload["name"],
+        "size_bytes": payload["size_bytes"],
+    }

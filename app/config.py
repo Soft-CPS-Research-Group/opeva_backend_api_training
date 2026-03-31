@@ -73,9 +73,14 @@ class Settings(BaseSettings):
 
     # ── Job/agent defaults ──────────────────────────────────────────────────────
     DEFAULT_JOB_IMAGE: str = "calof/opeva_simulator:latest"
+    JOB_IMAGE_REPOSITORY: str = "calof/algorithms"
+    JOB_IMAGE_TAGS_LIMIT: int = 50
+    JOB_IMAGE_CATALOG_TTL_SECONDS: int = 120
+    JOB_IMAGE_CATALOG_TIMEOUT_SECONDS: int = 10
     CONTAINER_NAME_PREFIX: str = "opeva_job"
     WORKER_STALE_GRACE_SECONDS: int = 120  # additional grace beyond heartbeat TTL
     JOB_STATUS_TTL: int = 300  # seconds before a job status is considered stale
+    DEUCALION_DISPATCH_STATUS_TTL: int = 21600  # allow long Slurm pending windows before forced requeue
     MLFLOW_UI_BASE_URL: str | None = None
     CORS_ALLOWED_ORIGINS: list[str] = [
         "http://localhost:5173",

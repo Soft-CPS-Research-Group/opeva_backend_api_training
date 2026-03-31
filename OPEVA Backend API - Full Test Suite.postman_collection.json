@@ -195,7 +195,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"config\": {\n    \"experiment\": {\n      \"name\": \"inline_postman_test\",\n      \"run_name\": \"inline-run-01\"\n    }\n  },\n  \"save_as\": \"postman_test_inline.yaml\"\n}"
+              "raw": "{\n  \"config\": {\n    \"experiment\": {\n      \"name\": \"inline_postman_test\",\n      \"run_name\": \"inline-run-01\"\n    }\n  },\n  \"save_as\": \"postman_test_inline.yaml\",\n  \"image\": \"calof/algorithms:v0.2.5\"\n}"
             },
             "url": "{{baseUrl}}/run-simulation"
           },
@@ -453,7 +453,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"config_path\": \"configs/demo.yaml\",\n  \"target_host\": \"worker-a\"\n}"
+              "raw": "{\n  \"config_path\": \"configs/demo.yaml\",\n  \"target_host\": \"worker-a\",\n  \"image\": \"calof/algorithms:v0.2.5\"\n}"
             },
             "url": "{{baseUrl}}/run-simulation"
           },
@@ -468,6 +468,28 @@
                   "const body = pm.response.json();",
                   "pm.test('job id returned', function () { pm.expect(body).to.have.property('job_id'); });",
                   "pm.collectionVariables.set('job_id', body.job_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Job Image Versions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/job-images/versions?repository=calof/algorithms&limit=50"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test('response has tags array', function () { pm.expect(body.tags).to.be.an('array'); });"
                 ]
               }
             }
@@ -505,6 +527,36 @@
                   "if (pm.response.code === 200) {",
                   "  pm.test('job requeued', function () { pm.expect(pm.response.json()).to.have.property('status', 'queued'); });",
                   "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stop Job (Ops)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"ops_manual_stop\"\n}"
+            },
+            "url": "{{baseUrl}}/ops/jobs/{{job_id}}/stop"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('response has status', function () { pm.expect(pm.response.json()).to.have.property('status'); });"
                 ]
               }
             }
@@ -672,6 +724,30 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/dataset/dates-available/living_lab"
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Dataset (ZIP)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "uploaded_dataset",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "/tmp/sample-dataset.zip"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/dataset/upload"
           },
           "response": []
         },

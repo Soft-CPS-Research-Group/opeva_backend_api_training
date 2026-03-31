@@ -46,3 +46,7 @@ def get_hosts():
 
 def get_job_resolved_config(job_id: str):
     return job_service.get_job_resolved_config(job_id)
+
+
+def get_job_image_versions(repository: str | None = None, limit: int | None = None):
+    return job_service.list_job_image_versions(repository, limit)

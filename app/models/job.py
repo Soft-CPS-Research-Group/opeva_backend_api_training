@@ -9,6 +9,7 @@ class JobLaunchRequest(BaseModel):
     save_as: Optional[str] = None
     job_name: Optional[str] = None
     submitted_by: Optional[str] = None
+    image: Optional[str] = None
 
 class SimulationRequest(BaseModel):
     config_path: str
