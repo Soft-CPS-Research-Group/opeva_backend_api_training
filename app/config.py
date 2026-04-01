@@ -85,8 +85,14 @@ class Settings(BaseSettings):
     MLFLOW_TRACKING_URI: str | None = None
     MLFLOW_UI_BASE_URL: str | None = None
     CORS_ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:8006",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8006",
+        "http://193.136.62.78:3000",
+        "http://193.136.62.78:8006",
         "https://softcps.dei.isep.ipp.pt:3001",
         "https://softcps.dei.isep.ipp.pt:8001",
     ]
