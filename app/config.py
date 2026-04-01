@@ -1,8 +1,39 @@
 # app/config.py
+import json
 import os
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
-from typing import ClassVar
+from typing import Any, ClassVar
+
+
+def _parse_cors_allowed_origins(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+
+        if raw.startswith("["):
+            try:
+                decoded = json.loads(raw)
+            except json.JSONDecodeError:
+                # Fall back to CSV-style parsing when env is not valid JSON.
+                pass
+            else:
+                if isinstance(decoded, list):
+                    return [str(item).strip() for item in decoded if str(item).strip()]
+
+        normalized = raw.lstrip("[").rstrip("]")
+        origins = []
+        for item in normalized.split(","):
+            candidate = item.strip().strip('"').strip("'").strip()
+            if candidate:
+                origins.append(candidate)
+        return origins
+
+    return []
 
 class Settings(BaseSettings):
     # ── Shared root ──────────────────────────────────────────────────────────────
@@ -84,7 +115,7 @@ class Settings(BaseSettings):
     DEUCALION_DISPATCH_STATUS_TTL: int = 21600  # allow long Slurm pending windows before forced requeue
     MLFLOW_TRACKING_URI: str | None = None
     MLFLOW_UI_BASE_URL: str | None = None
-    CORS_ALLOWED_ORIGINS: list[str] = [
+    CORS_ALLOWED_ORIGINS: str | list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:8006",
@@ -97,15 +128,10 @@ class Settings(BaseSettings):
         "https://softcps.dei.isep.ipp.pt:8001",
     ]
 
-    @field_validator("CORS_ALLOWED_ORIGINS", mode="before")
+    @field_validator("CORS_ALLOWED_ORIGINS", mode="after")
     @classmethod
-    def _parse_cors_origins(cls, value):
-        if isinstance(value, str):
-            stripped = value.strip()
-            if stripped.startswith("["):
-                return value
-            return [item.strip() for item in stripped.split(",") if item.strip()]
-        return value
+    def _parse_cors_origins(cls, value: Any) -> list[str]:
+        return _parse_cors_allowed_origins(value)
 
     def mongo_uri(self, db_name: str) -> str:
         return (
