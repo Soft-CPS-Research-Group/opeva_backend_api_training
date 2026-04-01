@@ -1244,24 +1244,41 @@ def get_job_info(job_id: str):
     with open(p) as f:
         info = json.load(f)
     info = _enrich_job_info_with_mlflow_links(info)
+    meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
     resolved_path = _resolved_config_path(job_id)
     info.setdefault("resolved_config_available", os.path.isfile(resolved_path))
     if info["resolved_config_available"]:
         info.setdefault("resolved_config_file", "config.resolved.yaml")
     if not info.get("submitted_by"):
-        meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
         submitted_by = meta.get("submitted_by")
         if submitted_by:
             info["submitted_by"] = submitted_by
     if not info.get("image"):
-        meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
         info["image"] = meta.get("image") or settings.DEFAULT_JOB_IMAGE
     if not info.get("image_tag"):
-        meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
         info["image_tag"] = meta.get("image_tag")
     if not info.get("deucalion_options"):
-        meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
         info["deucalion_options"] = meta.get("deucalion_options")
+
+    # Expose lifecycle timing in job details overview.
+    durations = _compute_job_durations(meta) if meta else {}
+    lifecycle_keys = (
+        "submitted_at",
+        "queued_at",
+        "dispatched_at",
+        "started_at",
+        "stop_requested_at",
+        "finished_at",
+        "last_status_at",
+    )
+    for key in lifecycle_keys:
+        if key not in info and key in meta:
+            info[key] = meta.get(key)
+    if durations:
+        info.setdefault("queue_wait_seconds", durations.get("queue_wait_seconds"))
+        info.setdefault("run_duration_seconds", durations.get("run_duration_seconds"))
+        info.setdefault("total_duration_seconds", durations.get("total_duration_seconds"))
+
     return info
 
 def delete_job(job_id: str):

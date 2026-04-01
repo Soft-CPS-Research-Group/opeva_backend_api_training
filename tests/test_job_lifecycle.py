@@ -374,6 +374,33 @@ def test_get_job_info_keeps_backward_compat_when_base_url_missing():
     assert "mlflow_run_url" not in result
 
 
+def test_get_job_info_includes_lifecycle_durations():
+    job_id = "job-info-lifecycle"
+    now = time.time()
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "status": JobStatus.FINISHED.value,
+        "submitted_at": now - 300,
+        "queued_at": now - 290,
+        "dispatched_at": now - 260,
+        "started_at": now - 240,
+        "finished_at": now - 40,
+        "last_status_at": now - 40,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "job_info.json").write_text(json.dumps({"job_id": job_id}))
+
+    result = job_service.get_job_info(job_id)
+    assert result["started_at"] == job_service.jobs[job_id]["started_at"]
+    assert result["finished_at"] == job_service.jobs[job_id]["finished_at"]
+    assert result["run_duration_seconds"] is not None
+    assert result["run_duration_seconds"] > 0
+    assert result["total_duration_seconds"] is not None
+    assert result["total_duration_seconds"] > 0
+
+
 def test_launch_defaults_to_first_host():
     settings.AVAILABLE_HOSTS = ["remoteA", "remoteB"]
 
