@@ -400,23 +400,15 @@ def _dockerhub_tag_digest(raw: dict) -> str | None:
     return None
 
 
-def list_job_image_versions(repository: Optional[str] = None, limit: Optional[int] = None) -> dict:
+def _fetch_dockerhub_tags(repository: str, max_tags: int) -> tuple[list[dict], bool, float]:
     repo = _normalize_image_repository(repository)
-    max_tags = int(limit or settings.JOB_IMAGE_TAGS_LIMIT)
-    max_tags = max(1, min(max_tags, 200))
     cache_key = f"{repo}:{max_tags}"
     now = time.time()
     ttl = max(0, int(settings.JOB_IMAGE_CATALOG_TTL_SECONDS))
 
     cached = _image_versions_cache.get(cache_key)
     if cached and (now - cached.get("fetched_at", 0.0)) < ttl:
-        return {
-            "repository": repo,
-            "tags": cached["tags"],
-            "count": len(cached["tags"]),
-            "cached": True,
-            "fetched_at": cached["fetched_at"],
-        }
+        return cached["tags"], True, cached["fetched_at"]
 
     namespace, name = repo.split("/", 1)
     next_url = (
@@ -462,12 +454,41 @@ def list_job_image_versions(repository: Optional[str] = None, limit: Optional[in
 
     fetched_at = time.time()
     _image_versions_cache[cache_key] = {"tags": tags, "fetched_at": fetched_at}
+    return tags, False, fetched_at
+
+
+def list_job_image_versions(repository: Optional[str] = None, limit: Optional[int] = None) -> dict:
+    repo = _normalize_image_repository(repository)
+    sif_repo = _normalize_image_repository(settings.JOB_SIF_REPOSITORY)
+    max_tags = int(limit or settings.JOB_IMAGE_TAGS_LIMIT)
+    max_tags = max(1, min(max_tags, 200))
+
+    image_tags, image_cached, image_fetched_at = _fetch_dockerhub_tags(repo, max_tags)
+    sif_tags, sif_cached, sif_fetched_at = _fetch_dockerhub_tags(sif_repo, max_tags)
+    sif_tag_names = {
+        str(tag.get("name"))
+        for tag in sif_tags
+        if isinstance(tag, dict) and isinstance(tag.get("name"), str)
+    }
+
+    tags_with_readiness: list[dict] = []
+    for tag in image_tags:
+        if not isinstance(tag, dict):
+            continue
+        tag_name = tag.get("name")
+        if not isinstance(tag_name, str):
+            continue
+        merged = dict(tag)
+        merged["deucalion_ready"] = tag_name in sif_tag_names
+        tags_with_readiness.append(merged)
+
     return {
         "repository": repo,
-        "tags": tags,
-        "count": len(tags),
-        "cached": False,
-        "fetched_at": fetched_at,
+        "sif_repository": sif_repo,
+        "tags": tags_with_readiness,
+        "count": len(tags_with_readiness),
+        "cached": bool(image_cached and sif_cached),
+        "fetched_at": max(image_fetched_at, sif_fetched_at),
     }
 
 

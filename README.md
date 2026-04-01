@@ -523,6 +523,8 @@ All runtime settings live in `app/config.py` (`Settings` class). Key attributes:
 | `JOB_STATUS_TTL` | `300` | Seconds before a job status is considered stale. |
 | `WORKER_STALE_GRACE_SECONDS` | `120` | Extra grace beyond heartbeat TTL before marking jobs failed. |
 | `DEFAULT_JOB_IMAGE` | `calof/opeva_simulator:latest` | Container image to run on workers. |
+| `JOB_IMAGE_REPOSITORY` | `calof/opeva_simulator` | Docker image repository queried by `/job-images/versions`. |
+| `JOB_SIF_REPOSITORY` | `calof/opeva_simulator_sif` | SIF OCI artifact repository used to derive `deucalion_ready` tag readiness. |
 | `CONTAINER_NAME_PREFIX` | `opeva_job` | Prefix for container names sent to workers. |
 | `MLFLOW_UI_BASE_URL` | `None` | Optional base URL to expose MLflow run links in API payloads. |
 | `MONGO_*` | `runtimeUI` / `runtimeUIDB` / host `193.136.62.78` | Mongo connection details. |

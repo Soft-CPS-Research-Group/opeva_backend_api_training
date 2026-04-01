@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     # ── Job/agent defaults ──────────────────────────────────────────────────────
     DEFAULT_JOB_IMAGE: str = "calof/opeva_simulator:latest"
     JOB_IMAGE_REPOSITORY: str = "calof/opeva_simulator"
+    JOB_SIF_REPOSITORY: str = "calof/opeva_simulator_sif"
     JOB_IMAGE_TAGS_LIMIT: int = 50
     JOB_IMAGE_CATALOG_TTL_SECONDS: int = 120
     JOB_IMAGE_CATALOG_TIMEOUT_SECONDS: int = 10

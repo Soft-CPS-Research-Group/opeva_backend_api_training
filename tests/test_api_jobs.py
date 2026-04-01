@@ -505,7 +505,15 @@ def test_job_image_versions_endpoint(api_client, monkeypatch):
         "list_job_image_versions",
         lambda repository=None, limit=None: {
             "repository": repository or "calof/algorithms",
-            "tags": [{"name": "v1.2.3", "last_updated": "2026-03-31T10:00:00Z", "digest": "sha256:abc"}],
+            "sif_repository": "calof/algorithms_sif",
+            "tags": [
+                {
+                    "name": "v1.2.3",
+                    "last_updated": "2026-03-31T10:00:00Z",
+                    "digest": "sha256:abc",
+                    "deucalion_ready": True,
+                }
+            ],
             "count": 1,
             "cached": False,
             "fetched_at": 1_710_000_000.0,
@@ -516,5 +524,7 @@ def test_job_image_versions_endpoint(api_client, monkeypatch):
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["repository"] == "calof/algorithms"
+    assert payload["sif_repository"] == "calof/algorithms_sif"
     assert payload["count"] == 1
     assert payload["tags"][0]["name"] == "v1.2.3"
+    assert payload["tags"][0]["deucalion_ready"] is True
