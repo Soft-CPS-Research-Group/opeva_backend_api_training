@@ -416,28 +416,33 @@ def test_agent_skips_jobs_for_other_hosts(monkeypatch):
 
 def test_launch_with_custom_image_is_dispatched_to_worker():
     settings.AVAILABLE_HOSTS = ["worker-a"]
-    image = "calof/custom-simulator:v2"
+    image_tag = "sha-customv2"
+    expected_image = f"{settings.JOB_IMAGE_REPOSITORY}:{image_tag}"
     result = asyncio.run(
         job_service.launch_simulation(
             JobLaunchRequest(
                 config={"experiment": {"name": "Image", "run_name": "Custom"}},
                 target_host="worker-a",
-                image=image,
+                image_tag=image_tag,
             )
         )
     )
 
     job_id = result["job_id"]
-    assert result["image"] == image
-    assert job_service.jobs[job_id]["image"] == image
+    assert result["image_tag"] == image_tag
+    assert result["image"] == expected_image
+    assert job_service.jobs[job_id]["image"] == expected_image
+    assert job_service.jobs[job_id]["image_tag"] == image_tag
 
     dispatched = job_service.agent_next_job("worker-a")
     assert dispatched is not None
     assert dispatched["job_id"] == job_id
-    assert dispatched["image"] == image
+    assert dispatched["image"] == expected_image
+    assert dispatched["image_tag"] == image_tag
 
     info = json.loads((Path(settings.JOBS_DIR) / job_id / "job_info.json").read_text())
-    assert info["image"] == image
+    assert info["image"] == expected_image
+    assert info["image_tag"] == image_tag
 
 
 def test_deucalion_does_not_pick_unpinned_jobs():
@@ -485,6 +490,48 @@ def test_deucalion_picks_only_explicit_deucalion_jobs():
     assert dispatched is not None
     assert dispatched["job_id"] == job_id
     assert not queue_file.exists()
+
+
+def test_launch_rejects_executor_specific_config():
+    settings.AVAILABLE_HOSTS = ["local", "deucalion"]
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            job_service.launch_simulation(
+                JobLaunchRequest(
+                    config={"execution": {"deucalion": {"partition": "normal-x86"}}},
+                    target_host="local",
+                )
+            )
+        )
+    assert exc.value.status_code == 400
+    assert "executor-specific" in str(exc.value.detail)
+
+
+def test_launch_deucalion_options_are_dispatched_to_deucalion_worker():
+    settings.AVAILABLE_HOSTS = ["deucalion"]
+    result = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(
+                config={"experiment": {"name": "Deucalion", "run_name": "Opts"}},
+                target_host="deucalion",
+                image_tag="sha-opt123",
+                deucalion_options={
+                    "partition": "normal-x86",
+                    "cpus_per_task": 8,
+                    "datasets": ["datasets/demo.csv"],
+                    "command_mode": "run",
+                },
+            )
+        )
+    )
+    job_id = result["job_id"]
+    dispatched = job_service.agent_next_job("deucalion")
+    assert dispatched is not None
+    assert dispatched["job_id"] == job_id
+    assert dispatched["image_tag"] == "sha-opt123"
+    assert dispatched["deucalion_options"]["partition"] == "normal-x86"
+    assert dispatched["deucalion_options"]["cpus_per_task"] == 8
+    assert dispatched["deucalion_options"]["datasets"] == ["datasets/demo.csv"]
 
 
 def test_agent_flow_updates_status_and_info():

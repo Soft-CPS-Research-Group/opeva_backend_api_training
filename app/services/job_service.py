@@ -1,7 +1,7 @@
 # app/services/job_service.py
 import os, re, json, yaml, time, logging
 from uuid import uuid4
-from typing import Generator, Optional
+from typing import Any, Generator, Optional
 from pathlib import Path
 from fastapi import HTTPException
 from urllib import request as urllib_request
@@ -369,6 +369,77 @@ def _normalize_job_image(value: Optional[str]) -> str:
     return image
 
 
+def _normalize_image_tag(value: Optional[str]) -> str:
+    if value is None:
+        return "latest"
+    tag = str(value).strip()
+    if not tag:
+        return "latest"
+    if len(tag) > 128:
+        raise HTTPException(400, "Image tag is too long")
+    if any(ch.isspace() for ch in tag):
+        raise HTTPException(400, "Invalid image tag")
+    if "/" in tag or "@" in tag or ":" in tag:
+        raise HTTPException(400, "Image tag must not contain '/', ':' or '@'")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", tag):
+        raise HTTPException(400, "Invalid image tag format")
+    return tag
+
+
+def _resolve_job_image_from_tag(image_tag: str) -> str:
+    repository = _normalize_image_repository(settings.JOB_IMAGE_REPOSITORY)
+    return f"{repository}:{image_tag}"
+
+
+def _normalize_deucalion_options(value: Any) -> dict | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise HTTPException(400, "deucalion_options must be an object")
+    normalized = {}
+    list_fields = {"modules", "datasets", "required_paths"}
+    for key, raw in value.items():
+        if raw is None:
+            continue
+        if key in list_fields:
+            if not isinstance(raw, list):
+                raise HTTPException(400, f"deucalion_options.{key} must be a list")
+            values = [str(item).strip() for item in raw if str(item).strip()]
+            if values:
+                normalized[key] = values
+            continue
+        if key in {"cpus_per_task", "mem_gb", "gpus"}:
+            try:
+                parsed = int(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"deucalion_options.{key} must be an integer")
+            if parsed < 0:
+                raise HTTPException(400, f"deucalion_options.{key} must be >= 0")
+            normalized[key] = parsed
+            continue
+        text = str(raw).strip()
+        if text:
+            normalized[key] = text
+    return normalized or None
+
+
+def _validate_executor_agnostic_config(config: dict) -> None:
+    execution = config.get("execution")
+    if not isinstance(execution, dict):
+        return
+    blocked = {"deucalion", "docker", "executor", "host", "runtime", "server", "local"}
+    invalid = sorted(key for key in execution.keys() if key in blocked)
+    if invalid:
+        joined = ", ".join(invalid)
+        raise HTTPException(
+            400,
+            (
+                "Config contains executor-specific fields under 'execution' "
+                f"({joined}). Move execution options to run-simulation payload."
+            ),
+        )
+
+
 def _normalize_image_repository(value: Optional[str]) -> str:
     repo = (value or settings.JOB_IMAGE_REPOSITORY or "").strip().strip("/")
     if not repo:
@@ -526,9 +597,15 @@ def _should_preserve_deucalion_dispatched(job_id: str, meta: dict, now_ts: float
 
     info = hb.get("info")
     if isinstance(info, dict):
-        active_job_id = info.get("active_job_id")
-        if active_job_id and active_job_id != job_id:
-            return False
+        active_job_ids = info.get("active_job_ids")
+        if isinstance(active_job_ids, list):
+            normalized_ids = {str(item) for item in active_job_ids if isinstance(item, str)}
+            if normalized_ids and job_id not in normalized_ids:
+                return False
+        else:
+            active_job_id = info.get("active_job_id")
+            if active_job_id and active_job_id != job_id:
+                return False
 
     return True
 
@@ -592,6 +669,25 @@ def _build_mlflow_run_url(
     return f"{normalized}/#/experiments/{experiment_id}/runs/{run_id}"
 
 
+def _resolve_mlflow_base_url(info: dict) -> Optional[str]:
+    candidates: list[Optional[str]] = [
+        settings.MLFLOW_UI_BASE_URL,
+        info.get("mlflow_ui_base_url") if isinstance(info, dict) else None,
+        info.get("tracking_ui_base_url") if isinstance(info, dict) else None,
+        info.get("tracking_uri") if isinstance(info, dict) else None,
+        info.get("mlflow_uri") if isinstance(info, dict) else None,
+    ]
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        text = candidate.strip()
+        if not text:
+            continue
+        if text.startswith("http://") or text.startswith("https://"):
+            return text
+    return None
+
+
 def _queue_payload(
     *,
     job_id: str,
@@ -624,7 +720,7 @@ def _enrich_job_info_with_mlflow_links(info: dict) -> dict:
 
     if "mlflow_run_url" not in enriched or not enriched.get("mlflow_run_url"):
         derived_url = _build_mlflow_run_url(
-            base_url=settings.MLFLOW_UI_BASE_URL,
+            base_url=_resolve_mlflow_base_url(enriched),
             experiment_id=str(experiment_id) if experiment_id is not None else None,
             run_id=str(run_id) if run_id is not None else None,
         )
@@ -632,6 +728,37 @@ def _enrich_job_info_with_mlflow_links(info: dict) -> dict:
             enriched["mlflow_run_url"] = derived_url
 
     return enriched
+
+
+def _normalize_active_jobs_payload(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        job_id = entry.get("job_id")
+        if not isinstance(job_id, str) or not job_id:
+            continue
+        row: dict[str, Any] = {"job_id": job_id}
+        for key in (
+            "job_name",
+            "status",
+            "phase",
+            "slurm_job_id",
+            "slurm_state",
+            "slurm_partition",
+            "slurm_nodes",
+            "slurm_cpus",
+            "slurm_gpus",
+            "queue_pos",
+            "ahead",
+            "updated_at",
+        ):
+            if key in entry and entry[key] is not None:
+                row[key] = entry[key]
+        normalized.append(row)
+    return normalized
 
 
 def record_host_heartbeat(worker_id: str, info: dict | None = None) -> None:
@@ -670,20 +797,30 @@ def _host_status_snapshot() -> dict[str, dict]:
         normalized_info = dict(raw_info)
         normalized_info["executor"] = raw_info.get("executor")
         normalized_info["worker_version"] = raw_info.get("worker_version") or raw_info.get("version")
+        normalized_active_jobs = _normalize_active_jobs_payload(raw_info.get("active_jobs"))
+        active_ids_from_info = [
+            str(item) for item in (raw_info.get("active_job_ids") or []) if isinstance(item, str)
+        ]
+        merged_active_ids = active_ids_from_info or [job.get("job_id") for job in normalized_active_jobs]
+        if not merged_active_ids:
+            merged_active_ids = active_job_ids
+
         normalized_info["active_job_id"] = raw_info.get("active_job_id") or current_job_id
         normalized_info["active_job_count"] = raw_info.get("active_job_count")
+        normalized_info["active_job_ids"] = merged_active_ids
+        normalized_info["active_jobs"] = normalized_active_jobs
         normalized_info["last_job_id"] = raw_info.get("last_job_id")
         normalized_info["last_terminal_status"] = raw_info.get("last_terminal_status")
         normalized_info["budget"] = raw_info.get("budget")
         normalized_info["budget_refreshed_at"] = raw_info.get("budget_refreshed_at")
         if normalized_info["active_job_count"] is None:
-            normalized_info["active_job_count"] = len(active_job_ids)
+            normalized_info["active_job_count"] = len(merged_active_ids)
         snapshot[host] = {
             "online": online,
             "last_seen": hb["last_seen"] if hb else None,
             "info": normalized_info,
             "running": _host_active_count(host),
-            "active_job_ids": active_job_ids,
+            "active_job_ids": merged_active_ids,
             "current_job_id": current_job_id,
             "current_job_status": current_job_status,
         }
@@ -839,11 +976,23 @@ async def launch_simulation(request: JobLaunchRequest):
     else:
         raise HTTPException(400, "Missing config or config_path")
 
+    if not isinstance(config, dict):
+        raise HTTPException(400, "Invalid config format")
+    _validate_executor_agnostic_config(config)
+
     experiment_name, run_name = _resolve_experiment_identity(config)
     requested_job_name = (request.job_name or "").strip()
     job_name = requested_job_name or f"{experiment_name}-{run_name}"
     submitted_by = (request.submitted_by or "").strip() or None
-    job_image = _normalize_job_image(request.image)
+    image_tag = _normalize_image_tag(request.image_tag)
+    job_image = _resolve_job_image_from_tag(image_tag)
+    deucalion_options = _normalize_deucalion_options(
+        request.deucalion_options.model_dump(exclude_none=True, by_alias=True)
+        if request.deucalion_options is not None
+        else None
+    )
+    if deucalion_options and preferred_host != "deucalion":
+        raise HTTPException(400, "deucalion_options are only allowed when target_host is 'deucalion'")
 
     if not config_path.startswith("configs/"):
         config_path = f"configs/{config_path}"
@@ -860,7 +1009,9 @@ async def launch_simulation(request: JobLaunchRequest):
         "status": JobStatus.LAUNCHING.value,
         "require_host": bool(preferred_host),
         "submitted_by": submitted_by,
+        "image_tag": image_tag,
         "image": job_image,
+        "deucalion_options": deucalion_options,
     }
     _persist_job(job_id, meta)
     job_utils.save_job_info(
@@ -873,7 +1024,9 @@ async def launch_simulation(request: JobLaunchRequest):
         exp=experiment_name,
         run=run_name,
         submitted_by=submitted_by,
+        image_tag=image_tag,
         image=job_image,
+        deucalion_options=deucalion_options,
     )
     _write_status(job_id, JobStatus.LAUNCHING.value, {"preferred_host": preferred_host})
 
@@ -894,6 +1047,7 @@ async def launch_simulation(request: JobLaunchRequest):
         "status": JobStatus.QUEUED.value,
         "host": preferred_host,
         "job_name": job_name,
+        "image_tag": image_tag,
         "image": job_image,
     }
 
@@ -1031,6 +1185,8 @@ def list_jobs():
         info.setdefault("job_name", merged.get("job_name"))
         info.setdefault("config_path", merged.get("config_path"))
         info.setdefault("target_host", merged.get("target_host"))
+        info.setdefault("image_tag", merged.get("image_tag"))
+        info.setdefault("deucalion_options", merged.get("deucalion_options"))
         info.setdefault("image", merged.get("image") or settings.DEFAULT_JOB_IMAGE)
 
         status_payload = get_status(job_id)
@@ -1100,6 +1256,12 @@ def get_job_info(job_id: str):
     if not info.get("image"):
         meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
         info["image"] = meta.get("image") or settings.DEFAULT_JOB_IMAGE
+    if not info.get("image_tag"):
+        meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
+        info["image_tag"] = meta.get("image_tag")
+    if not info.get("deucalion_options"):
+        meta = jobs.get(job_id) or job_utils.load_jobs().get(job_id, {})
+        info["deucalion_options"] = meta.get("deucalion_options")
     return info
 
 def delete_job(job_id: str):
@@ -1375,6 +1537,8 @@ def agent_next_job(worker_id: str):
         "config_path": config_path,
         "preferred_host": job_queue_entry.get("preferred_host"),
         "image": _normalize_job_image(meta.get("image")),
+        "image_tag": meta.get("image_tag"),
+        "deucalion_options": meta.get("deucalion_options") if worker_id == "deucalion" else None,
         "command": command,
         "container_name": container_name,
         "volumes": [{
@@ -1382,8 +1546,14 @@ def agent_next_job(worker_id: str):
             "container": "/data",
             "mode": "rw",
         }],
-        "env": {},
+        "env": {
+            "OPEVA_JOB_NAME": str(job_name),
+        },
     }
+    if settings.MLFLOW_TRACKING_URI:
+        response["env"]["MLFLOW_TRACKING_URI"] = str(settings.MLFLOW_TRACKING_URI)
+    if settings.MLFLOW_UI_BASE_URL:
+        response["env"]["MLFLOW_UI_BASE_URL"] = str(settings.MLFLOW_UI_BASE_URL)
 
     _LOGGER.info(
         "Dispatching job %s to worker %s (config=%s, preferred=%s)",
@@ -1411,6 +1581,10 @@ def agent_next_job(worker_id: str):
         info["config_path"] = config_path
     if "image" not in info:
         info["image"] = response["image"]
+    if "image_tag" not in info and response.get("image_tag"):
+        info["image_tag"] = response["image_tag"]
+    if worker_id == "deucalion" and response.get("deucalion_options") and "deucalion_options" not in info:
+        info["deucalion_options"] = response["deucalion_options"]
     with open(info_path, "w") as f:
         json.dump(info, f, indent=2)
 
@@ -1443,7 +1617,14 @@ def agent_update_status(job_id: str, status: str, extra: dict | None = None):
     worker = extra.get("worker_id")
     if worker:
         try:
-            record_host_heartbeat(worker, extra.get("details"))
+            current_info = {}
+            existing_hb = host_heartbeats.get(worker)
+            if isinstance(existing_hb, dict) and isinstance(existing_hb.get("info"), dict):
+                current_info.update(existing_hb.get("info", {}))
+            details_payload = extra.get("details")
+            if isinstance(details_payload, dict):
+                current_info["last_status_details"] = details_payload
+            record_host_heartbeat(worker, current_info)
         except HTTPException:
             # If the worker is unknown, don't block status updates
             _LOGGER.warning("Ignoring heartbeat from unknown worker %s", worker)

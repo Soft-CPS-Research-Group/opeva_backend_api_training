@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     WORKER_STALE_GRACE_SECONDS: int = 120  # additional grace beyond heartbeat TTL
     JOB_STATUS_TTL: int = 300  # seconds before a job status is considered stale
     DEUCALION_DISPATCH_STATUS_TTL: int = 21600  # allow long Slurm pending windows before forced requeue
+    MLFLOW_TRACKING_URI: str | None = None
     MLFLOW_UI_BASE_URL: str | None = None
     CORS_ALLOWED_ORIGINS: list[str] = [
         "http://localhost:5173",

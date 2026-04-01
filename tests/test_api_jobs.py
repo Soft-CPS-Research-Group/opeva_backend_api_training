@@ -216,25 +216,29 @@ def test_run_simulation_accepts_custom_image(api_client, monkeypatch):
     from app.services import job_service
 
     monkeypatch.setattr(settings, "AVAILABLE_HOSTS", ["worker-a"])
-    image = "calof/alt-image:2026.03"
+    image_tag = "sha-test123"
+    expected_image = f"{settings.JOB_IMAGE_REPOSITORY}:{image_tag}"
     response = api_client.post(
         "/run-simulation",
         json={
             "config": {"experiment": {"name": "Image", "run_name": "API"}},
             "target_host": "worker-a",
-            "image": image,
+            "image_tag": image_tag,
         },
     )
     assert response.status_code == 200
     job_id = response.json()["job_id"]
-    assert response.json()["image"] == image
+    assert response.json()["image_tag"] == image_tag
+    assert response.json()["image"] == expected_image
 
     dispatched = job_service.agent_next_job("worker-a")
     assert dispatched is not None
-    assert dispatched["image"] == image
+    assert dispatched["image"] == expected_image
+    assert dispatched["image_tag"] == image_tag
 
     info = api_client.get(f"/job-info/{job_id}").json()
-    assert info["image"] == image
+    assert info["image"] == expected_image
+    assert info["image_tag"] == image_tag
 
 
 def test_job_resolved_config_endpoint(api_client, monkeypatch):
