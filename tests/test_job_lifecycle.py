@@ -35,6 +35,8 @@ def jobs_env(tmp_path, monkeypatch):
         "QUEUE_DIR": settings.QUEUE_DIR,
         "JOB_TRACK_FILE": settings.JOB_TRACK_FILE,
         "AVAILABLE_HOSTS": list(settings.AVAILABLE_HOSTS),
+        "MLFLOW_TRACKING_URI": settings.MLFLOW_TRACKING_URI,
+        "DEUCALION_MLFLOW_TRACKING_URI": settings.DEUCALION_MLFLOW_TRACKING_URI,
         "MLFLOW_UI_BASE_URL": settings.MLFLOW_UI_BASE_URL,
         "HOST_HEARTBEATS": dict(job_service.host_heartbeats),
     }
@@ -559,6 +561,43 @@ def test_launch_deucalion_options_are_dispatched_to_deucalion_worker():
     assert dispatched["deucalion_options"]["partition"] == "normal-x86"
     assert dispatched["deucalion_options"]["cpus_per_task"] == 8
     assert dispatched["deucalion_options"]["datasets"] == ["datasets/demo.csv"]
+
+
+def test_deucalion_dispatch_uses_local_mlflow_tracking_uri():
+    settings.AVAILABLE_HOSTS = ["deucalion", "worker-a"]
+    settings.MLFLOW_TRACKING_URI = "http://193.136.62.78:5000"
+    settings.DEUCALION_MLFLOW_TRACKING_URI = "file:/data/mlflow/mlruns"
+
+    result = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(
+                config={"experiment": {"name": "Deucalion", "run_name": "MLflowLocal"}},
+                target_host="deucalion",
+                image_tag="sha-mlflowlocal",
+            )
+        )
+    )
+
+    job_id = result["job_id"]
+    dispatched = job_service.agent_next_job("deucalion")
+    assert dispatched is not None
+    assert dispatched["job_id"] == job_id
+    assert dispatched["env"]["MLFLOW_TRACKING_URI"] == "file:/data/mlflow/mlruns"
+
+    # Non-deucalion workers still receive the global tracking URI.
+    result_server = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(
+                config={"experiment": {"name": "Server", "run_name": "MLflowRemote"}},
+                target_host="worker-a",
+                image_tag="sha-mlflowremote",
+            )
+        )
+    )
+    dispatched_server = job_service.agent_next_job("worker-a")
+    assert dispatched_server is not None
+    assert dispatched_server["job_id"] == result_server["job_id"]
+    assert dispatched_server["env"]["MLFLOW_TRACKING_URI"] == "http://193.136.62.78:5000"
 
 
 def test_agent_flow_updates_status_and_info():

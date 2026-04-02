@@ -1567,7 +1567,11 @@ def agent_next_job(worker_id: str):
             "OPEVA_JOB_NAME": str(job_name),
         },
     }
-    if settings.MLFLOW_TRACKING_URI:
+    if worker_id == "deucalion":
+        deucalion_tracking_uri = str(settings.DEUCALION_MLFLOW_TRACKING_URI or "").strip()
+        if deucalion_tracking_uri:
+            response["env"]["MLFLOW_TRACKING_URI"] = deucalion_tracking_uri
+    elif settings.MLFLOW_TRACKING_URI:
         response["env"]["MLFLOW_TRACKING_URI"] = str(settings.MLFLOW_TRACKING_URI)
     if settings.MLFLOW_UI_BASE_URL:
         response["env"]["MLFLOW_UI_BASE_URL"] = str(settings.MLFLOW_UI_BASE_URL)
