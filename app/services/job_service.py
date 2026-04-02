@@ -156,12 +156,12 @@ def _resolve_log_path(job_id: str) -> Optional[str]:
         return None
 
     info = _read_job_info_payload(job_id)
-    candidate_names: list[str] = []
+    # Prefer the canonical merged stream written by workers into <job_id>.log.
+    candidate_names: list[str] = [f"{job_id}.log"]
     for key in ("run_id", "mlflow_run_id"):
         value = info.get(key)
         if isinstance(value, str) and value.strip():
             candidate_names.append(f"{value.strip()}.log")
-    candidate_names.append(f"{job_id}.log")
 
     seen: set[str] = set()
     for candidate_name in candidate_names:

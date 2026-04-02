@@ -92,7 +92,7 @@ def _use_temp_job_dir(monkeypatch, tmp_path, job_id: str, status: str = JobStatu
     return jobs_root
 
 
-def test_get_file_logs_resolves_run_id_first(monkeypatch, tmp_path):
+def test_get_file_logs_prefers_merged_job_log(monkeypatch, tmp_path):
     job_id = "job-run-id-log"
     jobs_root = _use_temp_job_dir(monkeypatch, tmp_path, job_id, JobStatus.FINISHED.value)
     logs_dir = jobs_root / job_id / "logs"
@@ -102,8 +102,8 @@ def test_get_file_logs_resolves_run_id_first(monkeypatch, tmp_path):
     (logs_dir / "run-123.log").write_text("run-id-log-line\n")
 
     payload = "".join(job_service.get_file_logs(job_id))
-    assert "run-id-log-line" in payload
-    assert "legacy-job-id-log" not in payload
+    assert "legacy-job-id-log" in payload
+    assert "run-id-log-line" not in payload
 
 
 def test_get_logs_resolves_mlflow_run_id(monkeypatch, tmp_path):
