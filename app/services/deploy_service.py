@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -170,6 +171,26 @@ def _hash_bundle(root: Path) -> tuple[str, int]:
     return bundle_id, file_count
 
 
+def _sanitize_storage_dir_name(raw_name: str, *, fallback: str) -> str:
+    base = (raw_name or "").replace("\\", "/").strip().split("/")[-1]
+    candidate = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._-")
+    return candidate or fallback
+
+
+def _bundle_storage_dir_name(record: dict) -> str:
+    configured = str(record.get("storage_dir_name") or "").strip()
+    if configured:
+        return configured
+
+    artifacts_dir = str(record.get("artifacts_dir_host") or "").strip()
+    if artifacts_dir:
+        resolved = Path(artifacts_dir).expanduser()
+        if resolved.name:
+            return resolved.name
+
+    return str(record.get("bundle_id") or "").strip()
+
+
 def _targets_raw() -> list[dict]:
     settings = _settings()
     raw = getattr(settings, "DEPLOY_INFERENCE_TARGETS", [])
@@ -234,6 +255,73 @@ def _bundle_record(bundle_id: str) -> dict:
     raise HTTPException(status_code=404, detail=f"Bundle '{bundle_id}' not found")
 
 
+def _bundle_artifacts_dir(bundle_id: str) -> tuple[dict, Path]:
+    record = _bundle_record(bundle_id)
+    root = Path(str(record.get("artifacts_dir_host", ""))).expanduser()
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=404, detail=f"Bundle '{bundle_id}' artifacts directory is missing")
+    return record, root
+
+
+def _resolve_bundle_file_path(bundle_root: Path, rel_path: str) -> tuple[str, Path]:
+    normalized = _normalize_rel_path(rel_path)
+    root_resolved = bundle_root.resolve()
+    candidate = (root_resolved / normalized).resolve()
+    if root_resolved != candidate and root_resolved not in candidate.parents:
+        raise HTTPException(status_code=400, detail="Bundle file path escapes artifacts directory")
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail=f"Bundle file '{normalized}' not found")
+    return normalized, candidate
+
+
+def list_bundle_files(bundle_id: str) -> dict:
+    record, root = _bundle_artifacts_dir(bundle_id)
+    files: list[dict] = []
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        rel = path.relative_to(root).as_posix()
+        files.append(
+            {
+                "path": rel,
+                "size_bytes": path.stat().st_size,
+            }
+        )
+
+    return {
+        "bundle_id": bundle_id,
+        "bundle_name": record.get("name") or bundle_id,
+        "file_count": len(files),
+        "files": files,
+    }
+
+
+def read_bundle_file_content(bundle_id: str, rel_path: str, max_bytes: int = 200_000) -> dict:
+    _, root = _bundle_artifacts_dir(bundle_id)
+    normalized, path = _resolve_bundle_file_path(root, rel_path)
+    size_bytes = path.stat().st_size
+
+    with open(path, "rb") as handle:
+        content_bytes = handle.read(max_bytes + 1)
+    truncated = len(content_bytes) > max_bytes
+    if truncated:
+        content_bytes = content_bytes[:max_bytes]
+
+    try:
+        content = content_bytes.decode("utf-8")
+        is_text = True
+    except UnicodeDecodeError:
+        content = None
+        is_text = False
+
+    return {
+        "bundle_id": bundle_id,
+        "path": normalized,
+        "is_text": is_text,
+        "size_bytes": size_bytes,
+        "truncated": truncated,
+        "content": content,
+    }
+
+
 def upload_bundle_folder(files: list[UploadFile], relative_paths: list[str] | None = None) -> dict:
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required")
@@ -258,31 +346,66 @@ def upload_bundle_folder(files: list[UploadFile], relative_paths: list[str] | No
 
         bundle_root = _resolve_bundle_root(staging_path)
         bundle_id, file_count = _hash_bundle(bundle_root)
+        storage_dir_name = _sanitize_storage_dir_name(bundle_root.name, fallback=f"bundle_{bundle_id[:8]}")
 
-        final_dir = Path(settings.DEPLOY_BUNDLE_STORAGE_DIR) / bundle_id
+        final_dir = Path(settings.DEPLOY_BUNDLE_STORAGE_DIR) / storage_dir_name
         manifest_path = final_dir / "artifact_manifest.json"
 
         created = False
         with _index_lock():
             payload = _read_index_unlocked()
-            existing = next((item for item in payload.get("bundles", []) if item.get("bundle_id") == bundle_id), None)
+            bundles = payload.setdefault("bundles", [])
+            existing_by_name = next(
+                (item for item in bundles if _bundle_storage_dir_name(item) == storage_dir_name),
+                None,
+            )
+            existing_by_id = next((item for item in bundles if item.get("bundle_id") == bundle_id), None)
+
+            existing = existing_by_name or existing_by_id
+            previous_storage_name = _bundle_storage_dir_name(existing) if existing else None
+
+            # Remove duplicate entry if both lookup keys matched different records.
+            if existing_by_name is not None and existing_by_id is not None and existing_by_name is not existing_by_id:
+                duplicate = existing_by_id if existing is existing_by_name else existing_by_name
+                duplicate_dir = Path(settings.DEPLOY_BUNDLE_STORAGE_DIR) / _bundle_storage_dir_name(duplicate)
+                bundles[:] = [item for item in bundles if item is not duplicate]
+                if duplicate_dir.exists() and duplicate_dir.is_dir() and duplicate_dir != final_dir:
+                    shutil.rmtree(duplicate_dir)
+
+            if previous_storage_name and previous_storage_name != storage_dir_name:
+                previous_dir = Path(settings.DEPLOY_BUNDLE_STORAGE_DIR) / previous_storage_name
+                if previous_dir.exists() and previous_dir.is_dir() and previous_dir != final_dir:
+                    shutil.rmtree(previous_dir)
+
+            if final_dir.exists():
+                shutil.rmtree(final_dir)
+            shutil.copytree(bundle_root, final_dir)
+
+            now = _utc_now_iso()
             if existing is None:
-                if final_dir.exists():
-                    shutil.rmtree(final_dir)
-                shutil.copytree(bundle_root, final_dir)
-                now = _utc_now_iso()
                 existing = {
                     "bundle_id": bundle_id,
                     "name": bundle_root.name,
+                    "storage_dir_name": storage_dir_name,
                     "file_count": file_count,
                     "artifacts_dir_host": str(final_dir),
                     "manifest_path_host": str(manifest_path),
                     "created_at": now,
                     "updated_at": now,
                 }
-                payload.setdefault("bundles", []).append(existing)
-                _write_index_unlocked(payload)
+                bundles.append(existing)
                 created = True
+            else:
+                existing["bundle_id"] = bundle_id
+                existing["name"] = bundle_root.name
+                existing["storage_dir_name"] = storage_dir_name
+                existing["file_count"] = file_count
+                existing["artifacts_dir_host"] = str(final_dir)
+                existing["manifest_path_host"] = str(manifest_path)
+                existing["updated_at"] = now
+                existing.setdefault("created_at", now)
+
+            _write_index_unlocked(payload)
 
         return {
             "created": created,
@@ -339,9 +462,10 @@ def get_inference_health(target_id: str) -> dict:
 
 def switch_inference_bundle(target_id: str, bundle_id: str) -> dict:
     target = _get_target(target_id)
-    _bundle_record(bundle_id)
+    record = _bundle_record(bundle_id)
+    storage_dir_name = _bundle_storage_dir_name(record)
 
-    artifacts_dir = f"{target.bundle_mount_path.rstrip('/')}/{bundle_id}"
+    artifacts_dir = f"{target.bundle_mount_path.rstrip('/')}/{storage_dir_name}"
     manifest_path = f"{artifacts_dir}/artifact_manifest.json"
 
     payload = {
@@ -374,6 +498,7 @@ def switch_inference_bundle(target_id: str, bundle_id: str) -> dict:
 
 def delete_bundle(bundle_id: str) -> dict:
     record = _bundle_record(bundle_id)
+    storage_dir_name = _bundle_storage_dir_name(record)
 
     for entry in _targets_raw():
         target = _target_from_entry(entry)
@@ -382,7 +507,7 @@ def delete_bundle(bundle_id: str) -> dict:
             continue
         if not health.get("configured"):
             continue
-        expected_manifest = _expected_container_manifest_path(target, bundle_id)
+        expected_manifest = _expected_container_manifest_path(target, storage_dir_name)
         if str(health.get("active_manifest_path") or "") == expected_manifest:
             raise HTTPException(
                 status_code=409,

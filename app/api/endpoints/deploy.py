@@ -38,6 +38,16 @@ def list_bundles():
     return deploy_controller.list_bundles()
 
 
+@router.get("/deploy/bundles/{bundle_id}/files")
+def list_bundle_files(bundle_id: str):
+    return deploy_controller.list_bundle_files(bundle_id)
+
+
+@router.get("/deploy/bundles/{bundle_id}/files/content")
+def read_bundle_file_content(bundle_id: str, path: str = Query(..., min_length=1)):
+    return deploy_controller.read_bundle_file_content(bundle_id, path)
+
+
 @router.post("/deploy/bundles/upload-folder")
 def upload_bundle_folder(
     files: list[UploadFile] = File(...),

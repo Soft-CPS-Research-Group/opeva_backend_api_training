@@ -21,6 +21,14 @@ def list_bundles() -> list[dict]:
     return deploy_service.list_bundles()
 
 
+def list_bundle_files(bundle_id: str) -> dict:
+    return deploy_service.list_bundle_files(bundle_id)
+
+
+def read_bundle_file_content(bundle_id: str, rel_path: str) -> dict:
+    return deploy_service.read_bundle_file_content(bundle_id, rel_path)
+
+
 def upload_bundle_folder(files: list[UploadFile], relative_paths: list[str] | None = None) -> dict:
     return deploy_service.upload_bundle_folder(files, relative_paths)
 

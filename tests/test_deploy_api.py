@@ -104,12 +104,14 @@ def test_list_inferences_returns_configured_targets(deploy_client: TestClient):
 
 
 def test_upload_folder_and_list_bundles(deploy_client: TestClient):
-    uploaded = _upload_bundle(deploy_client)
+    uploaded = _upload_bundle(deploy_client, folder_name="rh1_bundle")
     assert "bundle" in uploaded
     bundle = uploaded["bundle"]
 
     assert bundle["bundle_id"]
+    assert bundle["storage_dir_name"] == "rh1_bundle"
     assert Path(bundle["manifest_path_host"]).exists()
+    assert bundle["manifest_path_host"].endswith("/rh1_bundle/artifact_manifest.json")
 
     listed = deploy_client.get("/deploy/bundles")
     assert listed.status_code == 200
@@ -134,8 +136,9 @@ def test_upload_folder_requires_manifest(deploy_client: TestClient):
 def test_switch_bundle_resolves_container_paths(deploy_client: TestClient, monkeypatch):
     from app.services import deploy_service
 
-    uploaded = _upload_bundle(deploy_client)
+    uploaded = _upload_bundle(deploy_client, folder_name="rh1_bundle")
     bundle_id = uploaded["bundle"]["bundle_id"]
+    storage_dir_name = uploaded["bundle"]["storage_dir_name"]
 
     class _Resp:
         def __init__(self, payload: dict):
@@ -182,23 +185,24 @@ def test_switch_bundle_resolves_container_paths(deploy_client: TestClient, monke
     assert response.status_code == 200, response.text
     body = response.json()
 
-    expected_manifest = f"/data/bundles/{bundle_id}/artifact_manifest.json"
+    expected_manifest = f"/data/bundles/{storage_dir_name}/artifact_manifest.json"
     assert captured["post_payload"]["manifest_path"] == expected_manifest
-    assert captured["post_payload"]["artifacts_dir"] == f"/data/bundles/{bundle_id}"
+    assert captured["post_payload"]["artifacts_dir"] == f"/data/bundles/{storage_dir_name}"
     assert body["health"]["active_manifest_path"] == expected_manifest
 
 
 def test_delete_bundle_blocks_when_active_and_allows_when_inactive(deploy_client: TestClient, monkeypatch):
     from app.services import deploy_service
 
-    uploaded = _upload_bundle(deploy_client)
+    uploaded = _upload_bundle(deploy_client, folder_name="rh1_bundle")
     bundle_id = uploaded["bundle"]["bundle_id"]
+    storage_dir_name = uploaded["bundle"]["storage_dir_name"]
 
     def _active_probe(target):
         return {
             "reachable": True,
             "configured": True,
-            "active_manifest_path": f"{target.bundle_mount_path}/{bundle_id}/artifact_manifest.json",
+            "active_manifest_path": f"{target.bundle_mount_path}/{storage_dir_name}/artifact_manifest.json",
         }
 
     monkeypatch.setattr(deploy_service, "_probe_target_health", _active_probe)
@@ -235,3 +239,30 @@ def test_logs_stream_returns_data(deploy_client: TestClient, monkeypatch):
     assert response.status_code == 200
     assert "line-1" in response.text
     assert "line-2" in response.text
+
+
+def test_bundle_files_and_content(deploy_client: TestClient):
+    uploaded = _upload_bundle(deploy_client)
+    bundle_id = uploaded["bundle"]["bundle_id"]
+
+    files_response = deploy_client.get(f"/deploy/bundles/{bundle_id}/files")
+    assert files_response.status_code == 200, files_response.text
+    files_payload = files_response.json()
+    paths = [item["path"] for item in files_payload["files"]]
+    assert "artifact_manifest.json" in paths
+    assert "policy_agent_0.json" in paths
+
+    content_response = deploy_client.get(
+        f"/deploy/bundles/{bundle_id}/files/content",
+        params={"path": "artifact_manifest.json"},
+    )
+    assert content_response.status_code == 200, content_response.text
+    content_payload = content_response.json()
+    assert content_payload["is_text"] is True
+    assert '"manifest_version": 1' in content_payload["content"]
+
+    invalid_path_response = deploy_client.get(
+        f"/deploy/bundles/{bundle_id}/files/content",
+        params={"path": "../artifact_manifest.json"},
+    )
+    assert invalid_path_response.status_code == 400
