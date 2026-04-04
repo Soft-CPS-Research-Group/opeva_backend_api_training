@@ -16,7 +16,7 @@ import fcntl
 import httpx
 from fastapi import HTTPException, UploadFile
 
-from app.config import settings
+from app import config as app_config
 
 
 @dataclass(frozen=True)
@@ -28,11 +28,16 @@ class InferenceTarget:
     bundle_mount_path: str
 
 
+def _settings():
+    return app_config.settings
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _ensure_deploy_dirs() -> None:
+    settings = _settings()
     os.makedirs(settings.DEPLOY_BUNDLES_DIR, exist_ok=True)
     os.makedirs(settings.DEPLOY_BUNDLE_STORAGE_DIR, exist_ok=True)
     if not os.path.exists(settings.DEPLOY_BUNDLE_INDEX_FILE):
@@ -41,6 +46,7 @@ def _ensure_deploy_dirs() -> None:
 
 
 def _index_lock_path() -> str:
+    settings = _settings()
     return f"{settings.DEPLOY_BUNDLE_INDEX_FILE}.lock"
 
 
@@ -58,6 +64,7 @@ def _index_lock() -> Iterable[None]:
 
 
 def _read_index_unlocked() -> dict:
+    settings = _settings()
     try:
         with open(settings.DEPLOY_BUNDLE_INDEX_FILE, "r", encoding="utf-8") as handle:
             data = json.load(handle)
@@ -71,6 +78,7 @@ def _read_index_unlocked() -> dict:
 
 
 def _write_index_unlocked(data: dict) -> None:
+    settings = _settings()
     os.makedirs(os.path.dirname(settings.DEPLOY_BUNDLE_INDEX_FILE), exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(
         dir=os.path.dirname(settings.DEPLOY_BUNDLE_INDEX_FILE),
@@ -163,6 +171,7 @@ def _hash_bundle(root: Path) -> tuple[str, int]:
 
 
 def _targets_raw() -> list[dict]:
+    settings = _settings()
     raw = getattr(settings, "DEPLOY_INFERENCE_TARGETS", [])
     return raw if isinstance(raw, list) else []
 
@@ -230,6 +239,7 @@ def upload_bundle_folder(files: list[UploadFile], relative_paths: list[str] | No
         raise HTTPException(status_code=400, detail="At least one file is required")
 
     _ensure_deploy_dirs()
+    settings = _settings()
 
     normalized_paths = _sanitize_uploaded_relative_paths(files, relative_paths)
 
