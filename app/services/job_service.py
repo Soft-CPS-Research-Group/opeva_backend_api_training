@@ -3,6 +3,8 @@ import os, re, json, yaml, time, logging
 from uuid import uuid4
 from typing import Any, Generator, Optional
 from pathlib import Path
+from datetime import datetime, timezone
+from collections import deque
 from fastapi import HTTPException
 from urllib import request as urllib_request
 from urllib import parse as urllib_parse
@@ -78,12 +80,35 @@ DEUCALION_SLURM_ACTIVE_STATES = {
 }
 
 _image_versions_cache: dict[str, dict] = {}
+_LOG_CHUNK_DEFAULT_TAIL_LINES = 200
+_LOG_CHUNK_DEFAULT_MAX_BYTES = 256 * 1024
+_LOG_CHUNK_MAX_BYTES_LIMIT = 2 * 1024 * 1024
+
+
+def _parse_timestamp(value) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            pass
+        iso_text = text[:-1] + "+00:00" if text.endswith("Z") else text
+        try:
+            parsed = datetime.fromisoformat(iso_text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    return None
 
 
 def _ensure_float(value) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
-    return None
+    return _parse_timestamp(value)
 
 
 def _is_yaml_filename(value: str) -> bool:
@@ -237,14 +262,48 @@ def _apply_lifecycle_metadata(meta: dict, *, prev_status: str | None, status: st
     elif status == JobStatus.DISPATCHED.value:
         if prev_status != JobStatus.DISPATCHED.value:
             meta["attempt_number"] = int(meta.get("attempt_number", 0) or 0) + 1
+        meta.setdefault("queued_at", status_ts)
         meta["dispatched_at"] = status_ts
     elif status == JobStatus.RUNNING.value:
+        meta.setdefault("queued_at", status_ts)
         meta.setdefault("started_at", status_ts)
     elif status == JobStatus.STOP_REQUESTED.value:
         meta["stop_requested_at"] = status_ts
 
     if status in TERMINAL_JOB_STATUSES:
         meta["finished_at"] = status_ts
+
+
+def _apply_detail_timestamps(meta: dict, details: dict, *, status_ts: float) -> None:
+    if not isinstance(details, dict):
+        return
+
+    queued_candidates = (
+        details.get("queued_at"),
+    )
+    started_candidates = (
+        details.get("started_at"),
+    )
+
+    queued_ts = next((candidate for candidate in (_parse_timestamp(v) for v in queued_candidates) if candidate is not None), None)
+    started_ts = next((candidate for candidate in (_parse_timestamp(v) for v in started_candidates) if candidate is not None), None)
+
+    current_queued = _ensure_float(meta.get("queued_at"))
+    if queued_ts is not None:
+        meta["queued_at"] = min(current_queued, queued_ts) if current_queued is not None else queued_ts
+
+    current_started = _ensure_float(meta.get("started_at"))
+    if started_ts is not None:
+        meta["started_at"] = min(current_started, started_ts) if current_started is not None else started_ts
+
+    # Queue timing is backend lifecycle timing: queue ends when leaving dispatched/running path.
+    if meta.get("status") in TERMINAL_JOB_STATUSES and _ensure_float(meta.get("started_at")) is None:
+        meta["started_at"] = status_ts
+
+    if _ensure_float(meta.get("queued_at")) is None:
+        fallback_queued = _ensure_float(meta.get("submitted_at"))
+        if fallback_queued is not None:
+            meta["queued_at"] = fallback_queued
 
 
 def _compute_job_durations(meta: dict, now_ts: float | None = None) -> dict:
@@ -298,6 +357,11 @@ def _write_status(job_id: str, status: str, extra: dict | None = None):
         _apply_lifecycle_metadata(jobs[job_id], prev_status=prev_status, status=status, status_ts=status_ts)
         if extra_payload:
             jobs[job_id].update(extra_payload)
+        _apply_detail_timestamps(
+            jobs[job_id],
+            extra_payload.get("details") if isinstance(extra_payload.get("details"), dict) else {},
+            status_ts=status_ts,
+        )
         job_utils.save_job(job_id, jobs[job_id])
 
 
@@ -314,6 +378,11 @@ def _force_status(job_id: str, status: str, extra: dict | None = None) -> None:
         meta["status"] = status
         _apply_lifecycle_metadata(meta, prev_status=prev_status, status=status, status_ts=status_ts)
         meta.update(extra_payload)
+        _apply_detail_timestamps(
+            meta,
+            extra_payload.get("details") if isinstance(extra_payload.get("details"), dict) else {},
+            status_ts=status_ts,
+        )
         job_utils.save_job(job_id, meta)
         jobs[job_id] = meta
 
@@ -1090,6 +1159,41 @@ def _stream_file(path: str) -> Generator[str, None, None]:
         for line in f:
             yield line
 
+
+def _read_log_tail(path: str, *, tail_lines: int, max_bytes: int) -> tuple[str, int, bool]:
+    file_size = os.path.getsize(path)
+    if file_size <= 0:
+        return "", 0, False
+
+    lines_limit = max(1, tail_lines)
+    with open(path, "rb") as handle:
+        selected = deque(maxlen=lines_limit)
+        for raw_line in handle:
+            selected.append(raw_line)
+    payload = b"".join(selected)
+    truncated = len(payload) > max_bytes
+    if truncated:
+        payload = payload[-max_bytes:]
+    start_offset = max(0, file_size - len(payload))
+    return payload.decode("utf-8", errors="replace"), file_size, truncated or start_offset > 0
+
+
+def _read_log_delta(path: str, *, offset: int, max_bytes: int) -> tuple[str, int, bool]:
+    file_size = os.path.getsize(path)
+    safe_offset = max(0, min(offset, file_size))
+    if file_size <= safe_offset:
+        return "", file_size, False
+
+    with open(path, "rb") as handle:
+        handle.seek(safe_offset)
+        payload = handle.read(max_bytes + 1)
+
+    truncated = len(payload) > max_bytes
+    if truncated:
+        payload = payload[:max_bytes]
+    next_offset = safe_offset + len(payload)
+    return payload.decode("utf-8", errors="replace"), next_offset, truncated or next_offset < file_size
+
 def get_file_logs(job_id: str):
     path = _resolve_log_path(job_id)
     if not path:
@@ -1115,6 +1219,65 @@ def get_logs(job_id: str):
         def _msg():
             yield "Logs not available yet. Job is still initializing or running.\n"
         return _msg()
+    raise HTTPException(404, "Logs not available for this job")
+
+
+def get_logs_chunk(
+    job_id: str,
+    *,
+    offset: int | None = None,
+    tail_lines: int = _LOG_CHUNK_DEFAULT_TAIL_LINES,
+    max_bytes: int = _LOG_CHUNK_DEFAULT_MAX_BYTES,
+) -> dict:
+    safe_tail_lines = max(1, int(tail_lines))
+    safe_max_bytes = max(1024, min(int(max_bytes), _LOG_CHUNK_MAX_BYTES_LIMIT))
+
+    path = _resolve_log_path(job_id)
+    if path and os.path.exists(path):
+        if offset is None:
+            text, next_offset, truncated = _read_log_tail(
+                path,
+                tail_lines=safe_tail_lines,
+                max_bytes=safe_max_bytes,
+            )
+        else:
+            text, next_offset, truncated = _read_log_delta(
+                path,
+                offset=int(offset),
+                max_bytes=safe_max_bytes,
+            )
+
+        return {
+            "job_id": job_id,
+            "text": text,
+            "next_offset": next_offset,
+            "truncated": truncated,
+            "available": True,
+            "message": None,
+        }
+
+    _refresh_jobs()
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Logs not available for this job")
+
+    status_now = _read_status_file(job_id) or job.get("status", JobStatus.UNKNOWN.value)
+    if status_now in {
+        JobStatus.LAUNCHING.value,
+        JobStatus.QUEUED.value,
+        JobStatus.DISPATCHED.value,
+        JobStatus.RUNNING.value,
+        JobStatus.STOP_REQUESTED.value,
+    }:
+        return {
+            "job_id": job_id,
+            "text": "",
+            "next_offset": max(0, int(offset or 0)),
+            "truncated": False,
+            "available": False,
+            "message": "Logs not available yet. Job is still initializing or running.",
+        }
+
     raise HTTPException(404, "Logs not available for this job")
 
 # ---------- API: stop/list/info/delete/hosts ----------

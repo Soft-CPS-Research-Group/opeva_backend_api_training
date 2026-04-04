@@ -148,3 +148,36 @@ def test_get_logs_active_job_without_file_returns_wait_message(monkeypatch, tmp_
 
     payload = "".join(job_service.get_logs(job_id))
     assert "Logs not available yet" in payload
+
+
+def test_get_logs_chunk_returns_tail_then_delta(monkeypatch, tmp_path):
+    job_id = "job-chunk"
+    jobs_root = _use_temp_job_dir(monkeypatch, tmp_path, job_id, JobStatus.RUNNING.value)
+    logs_dir = jobs_root / job_id / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / f"{job_id}.log"
+    log_file.write_text("line-1\nline-2\nline-3\n", encoding="utf-8")
+
+    first = job_service.get_logs_chunk(job_id, tail_lines=2, max_bytes=4096)
+    assert first["available"] is True
+    assert first["text"] == "line-2\nline-3\n"
+    assert isinstance(first["next_offset"], int)
+
+    with log_file.open("a", encoding="utf-8") as handle:
+        handle.write("line-4\n")
+
+    second = job_service.get_logs_chunk(job_id, offset=first["next_offset"], max_bytes=4096)
+    assert second["available"] is True
+    assert second["text"] == "line-4\n"
+    assert second["next_offset"] > first["next_offset"]
+
+
+def test_get_logs_chunk_active_job_without_file_returns_empty(monkeypatch, tmp_path):
+    job_id = "job-active-no-log-chunk"
+    _use_temp_job_dir(monkeypatch, tmp_path, job_id, JobStatus.RUNNING.value)
+    job_service.job_utils.write_status_file(job_id, JobStatus.RUNNING.value, {})
+
+    payload = job_service.get_logs_chunk(job_id)
+    assert payload["available"] is False
+    assert payload["text"] == ""
+    assert "Logs not available yet" in payload["message"]

@@ -403,6 +403,72 @@ def test_get_job_info_includes_lifecycle_durations():
     assert result["total_duration_seconds"] > 0
 
 
+def test_queue_wait_uses_backend_lifecycle_not_slurm_details():
+    job_id = "job-lifecycle-queuewait"
+    now = time.time()
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "job_name": "LifecycleQueueWait",
+        "config_path": "configs/demo.yaml",
+        "target_host": "deucalion",
+        "status": JobStatus.DISPATCHED.value,
+        "queued_at": now - 120,
+        "dispatched_at": now - 90,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "job_info.json").write_text(json.dumps({"job_id": job_id}))
+    job_utils.write_status_file(job_id, JobStatus.DISPATCHED.value, {})
+
+    job_service.agent_update_status(
+        job_id,
+        JobStatus.FAILED.value,
+        {
+            "worker_id": "deucalion",
+            "details": {
+                "slurm_submit_time": "2026-04-04T10:00:00Z",
+                "slurm_start_time": "2026-04-04T10:02:30Z",
+            },
+        },
+    )
+
+    [entry] = [item for item in job_service.list_jobs() if item["job_id"] == job_id]
+    assert entry["queue_wait_seconds"] == pytest.approx(120.0, rel=0.0, abs=1.0)
+    assert entry["job_meta"]["started_at"] is not None
+    assert entry["job_meta"]["queued_at"] is not None
+
+
+def test_queue_wait_ends_when_leaving_dispatched_if_running_missing():
+    job_id = "job-queuewait-fallback"
+    now = time.time()
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "job_name": "QueueWaitFallback",
+        "config_path": "configs/demo.yaml",
+        "target_host": "deucalion",
+        "status": JobStatus.DISPATCHED.value,
+        "queued_at": now - 30,
+        "dispatched_at": now - 10,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+    job_dir = Path(settings.JOBS_DIR) / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "job_info.json").write_text(json.dumps({"job_id": job_id}))
+    job_utils.write_status_file(job_id, JobStatus.DISPATCHED.value, {})
+
+    job_service.agent_update_status(
+        job_id,
+        JobStatus.FAILED.value,
+        {"worker_id": "deucalion"},
+    )
+
+    [entry] = [item for item in job_service.list_jobs() if item["job_id"] == job_id]
+    assert entry["queue_wait_seconds"] is not None
+    assert entry["queue_wait_seconds"] == pytest.approx(30.0, rel=0.0, abs=1.0)
+    assert entry["job_meta"]["started_at"] is not None
+
+
 def test_launch_defaults_to_first_host():
     settings.AVAILABLE_HOSTS = ["remoteA", "remoteB"]
 

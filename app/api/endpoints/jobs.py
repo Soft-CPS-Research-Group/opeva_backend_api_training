@@ -25,6 +25,15 @@ async def get_progress(job_id: str):
 async def get_logs(job_id: str):
     return StreamingResponse(job_controller.get_logs(job_id), media_type="text/plain")
 
+@router.get("/logs-chunk/{job_id}")
+async def get_logs_chunk(
+    job_id: str,
+    offset: int | None = Query(default=None, ge=0),
+    tail_lines: int = Query(default=200, ge=1, le=5000),
+    max_bytes: int = Query(default=262144, ge=1024, le=2097152),
+):
+    return job_controller.get_logs_chunk(job_id, offset=offset, tail_lines=tail_lines, max_bytes=max_bytes)
+
 @router.post("/stop/{job_id}")
 async def stop_job(job_id: str):
     return job_controller.stop_job(job_id)

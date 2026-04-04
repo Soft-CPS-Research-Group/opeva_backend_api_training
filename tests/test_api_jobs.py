@@ -265,6 +265,39 @@ def test_job_resolved_config_endpoint(api_client, monkeypatch):
     assert info_resp.json()["resolved_config_available"] is True
 
 
+def test_job_logs_chunk_endpoint_supports_tail_and_offset(api_client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AVAILABLE_HOSTS", ["local"])
+    response = api_client.post(
+        "/run-simulation",
+        json={"config": {"metadata": {"experiment_name": "Logs", "run_name": "Chunk"}}},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    logs_dir = Path(settings.JOBS_DIR) / job_id / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / f"{job_id}.log"
+    log_path.write_text("line-a\nline-b\nline-c\n", encoding="utf-8")
+
+    first = api_client.get(f"/logs-chunk/{job_id}?tail_lines=2")
+    assert first.status_code == 200
+    first_payload = first.json()
+    assert first_payload["text"] == "line-b\nline-c\n"
+    assert first_payload["available"] is True
+    assert isinstance(first_payload["next_offset"], int)
+
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("line-d\n")
+
+    second = api_client.get(f"/logs-chunk/{job_id}?offset={first_payload['next_offset']}")
+    assert second.status_code == 200
+    second_payload = second.json()
+    assert second_payload["text"] == "line-d\n"
+    assert second_payload["next_offset"] > first_payload["next_offset"]
+
+
 def test_agent_job_status_updates_exit_code(api_client, monkeypatch):
     from app.config import settings
     from app.services import job_service

@@ -22,6 +22,10 @@ def get_progress(job_id: str):
 def get_logs(job_id: str):
     return job_service.get_logs(job_id)
 
+
+def get_logs_chunk(job_id: str, offset: int | None = None, tail_lines: int = 200, max_bytes: int = 262144):
+    return job_service.get_logs_chunk(job_id, offset=offset, tail_lines=tail_lines, max_bytes=max_bytes)
+
 def stop_job(job_id: str):
     return job_service.stop_job(job_id)
 
