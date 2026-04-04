@@ -5,7 +5,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -14,6 +13,7 @@ from pathlib import Path
 from typing import Generator, Iterable
 
 import fcntl
+import docker
 import httpx
 from fastapi import HTTPException, UploadFile
 
@@ -531,31 +531,44 @@ def delete_bundle(bundle_id: str) -> dict:
 def stream_inference_logs(target_id: str, tail: int = 200) -> Generator[str, None, None]:
     target = _get_target(target_id)
     safe_tail = max(0, int(tail))
-
-    process = subprocess.Popen(
-        [
-            "docker",
-            "logs",
-            "--follow",
-            "--tail",
-            str(safe_tail),
-            target.container_name,
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
+    client = docker.DockerClient(base_url="unix://var/run/docker.sock")
+    try:
+        container = client.containers.get(target.container_name)
+    except docker.errors.NotFound as exc:
+        client.close()
+        raise HTTPException(
+            status_code=404,
+            detail=f"Inference container '{target.container_name}' not found",
+        ) from exc
+    except docker.errors.DockerException as exc:
+        client.close()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not access Docker daemon for logs: {exc}",
+        ) from exc
 
     try:
-        if process.stdout is None:
-            return
-        for line in process.stdout:
-            yield line
+        stream = container.logs(
+            stream=True,
+            follow=True,
+            tail=safe_tail,
+            stdout=True,
+            stderr=True,
+        )
+    except docker.errors.DockerException as exc:
+        client.close()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not open log stream for '{target.container_name}': {exc}",
+        ) from exc
+
+    try:
+        for chunk in stream:
+            if isinstance(chunk, bytes):
+                yield chunk.decode("utf-8", errors="replace")
+            else:
+                yield str(chunk)
+    except docker.errors.DockerException as exc:
+        yield f"\n[deploy] log stream interrupted: {exc}\n"
     finally:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
+        client.close()
