@@ -53,6 +53,11 @@ def ensure_directories():
     os.makedirs(settings.JOBS_DIR, exist_ok=True)
     os.makedirs(settings.DATASETS_DIR, exist_ok=True)
     os.makedirs(settings.QUEUE_DIR, exist_ok=True)
+    os.makedirs(settings.DEPLOY_BUNDLES_DIR, exist_ok=True)
+    os.makedirs(settings.DEPLOY_BUNDLE_STORAGE_DIR, exist_ok=True)
+    if not os.path.exists(settings.DEPLOY_BUNDLE_INDEX_FILE):
+        with open(settings.DEPLOY_BUNDLE_INDEX_FILE, "w") as f:
+            json.dump({"bundles": []}, f, indent=2)
     if not os.path.exists(settings.JOB_TRACK_FILE):
         with _job_track_lock():
             _write_job_track_unlocked({})

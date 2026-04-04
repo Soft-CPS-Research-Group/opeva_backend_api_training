@@ -517,6 +517,10 @@ All runtime settings live in `app/config.py` (`Settings` class). Key attributes:
 | `DATASETS_DIR` | `${VM_SHARED_DATA}/datasets` | Exported datasets. |
 | `QUEUE_DIR` | `${VM_SHARED_DATA}/queue` | Agent job queue. |
 | `JOB_TRACK_FILE` | `${VM_SHARED_DATA}/job_track.json` | Persistent job registry. |
+| `DEPLOY_BUNDLES_DIR` | `${VM_SHARED_DATA}/inference_bundles` | Root folder for inference bundle catalog. |
+| `DEPLOY_BUNDLE_STORAGE_DIR` | `${DEPLOY_BUNDLES_DIR}/bundles` | Stored bundle folders used for runtime switch. |
+| `DEPLOY_BUNDLE_INDEX_FILE` | `${DEPLOY_BUNDLES_DIR}/index.json` | Persistent bundle catalog index. |
+| `DEPLOY_INFERENCE_TARGETS` | `[]` | Static list of inference targets (`id`, `name`, `base_url`, `container_name`, `bundle_mount_path`). |
 | `AVAILABLE_HOSTS` | `["tiago-laptop", "local", "deucalion"]` | Valid `target_host` values. |
 | `HOST_HEARTBEAT_TTL` | `60` | Seconds before a host is considered offline if no heartbeat is received. |
 | `QUEUE_CLAIM_TTL` | `300` | Seconds before a claimed queue file is re-queued. |
@@ -531,6 +535,15 @@ All runtime settings live in `app/config.py` (`Settings` class). Key attributes:
 | `ACCEPTABLE_GAP_IN_MINUTES` | `60` | Controls interpolation in dataset exports. |
 
 Override via environment variables (uppercase) or `.env` file compatible with `pydantic-settings`.
+
+Deploy management endpoints:
+- `GET /deploy/inferences`
+- `GET /deploy/inferences/{id}/health`
+- `POST /deploy/inferences/{id}/switch-bundle`
+- `GET /deploy/inferences/{id}/logs/stream`
+- `GET /deploy/bundles`
+- `POST /deploy/bundles/upload-folder`
+- `DELETE /deploy/bundles/{bundle_id}`
 
 ---
 

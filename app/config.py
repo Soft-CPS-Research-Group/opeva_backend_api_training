@@ -35,6 +35,34 @@ def _parse_cors_allowed_origins(value: Any) -> list[str]:
 
     return []
 
+
+def _parse_deploy_targets(value: Any) -> list[dict[str, str]]:
+    if value in (None, "", []):
+        return []
+
+    raw = value
+    if isinstance(value, str):
+        try:
+            raw = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("DEPLOY_INFERENCE_TARGETS must be valid JSON") from exc
+
+    if not isinstance(raw, list):
+        raise ValueError("DEPLOY_INFERENCE_TARGETS must be a list")
+
+    targets: list[dict[str, str]] = []
+    required = ("id", "name", "base_url", "container_name", "bundle_mount_path")
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ValueError("Each DEPLOY_INFERENCE_TARGETS item must be an object")
+        normalized = {key: str(entry.get(key, "")).strip() for key in required}
+        missing = [key for key, candidate in normalized.items() if not candidate]
+        if missing:
+            raise ValueError(f"Invalid target entry; missing keys: {', '.join(missing)}")
+        targets.append(normalized)
+
+    return targets
+
 class Settings(BaseSettings):
     # ── Shared root ──────────────────────────────────────────────────────────────
     VM_SHARED_DATA: str = "/opt/opeva_shared_data"
@@ -46,6 +74,32 @@ class Settings(BaseSettings):
     DATASETS_DIR: str  = os.path.join(VM_SHARED_DATA, "datasets")
     QUEUE_DIR: str     = os.path.join(VM_SHARED_DATA, "queue")  # for worker-agent jobs
     QUEUE_CLAIM_TTL: int = 300  # seconds before a claimed queue file is re-queued
+    DEPLOY_BUNDLES_DIR: str = os.path.join(VM_SHARED_DATA, "inference_bundles")
+    DEPLOY_BUNDLE_STORAGE_DIR: str = os.path.join(DEPLOY_BUNDLES_DIR, "bundles")
+    DEPLOY_BUNDLE_INDEX_FILE: str = os.path.join(DEPLOY_BUNDLES_DIR, "index.json")
+    DEPLOY_INFERENCE_TARGETS: list[dict[str, str]] = [
+        {
+            "id": "hq",
+            "name": "HQ",
+            "base_url": "http://energaize_inference_hq:8002",
+            "container_name": "energaize_inference_hq",
+            "bundle_mount_path": "/data",
+        },
+        {
+            "id": "sao_mamede",
+            "name": "Sao Mamede",
+            "base_url": "http://energaize_inference_sao_mamede:8002",
+            "container_name": "energaize_inference_sao_mamede",
+            "bundle_mount_path": "/data",
+        },
+        {
+            "id": "rh01",
+            "name": "RH01",
+            "base_url": "http://energaize_inference_rh01:8002",
+            "container_name": "energaize_inference_rh01",
+            "bundle_mount_path": "/data",
+        },
+    ]
 
     # ── Hosts: simple names. "local" runs on server; others go to that worker's agent ─
     AVAILABLE_HOSTS: list[str] = ["tiago-laptop", "local", "deucalion"]
@@ -133,6 +187,11 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_cors_origins(cls, value: Any) -> list[str]:
         return _parse_cors_allowed_origins(value)
+
+    @field_validator("DEPLOY_INFERENCE_TARGETS", mode="before")
+    @classmethod
+    def _parse_deploy_inference_targets(cls, value: Any) -> list[dict[str, str]]:
+        return _parse_deploy_targets(value)
 
     def mongo_uri(self, db_name: str) -> str:
         return (
