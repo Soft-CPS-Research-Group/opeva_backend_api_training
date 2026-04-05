@@ -16,9 +16,9 @@ async def simulation_data_index(payload: SimulationDataIndexRequest):
 
 @router.post("/simulation-data/file")
 async def simulation_data_file(payload: SimulationDataFileRequest):
-    content = simulation_data_controller.read_simulation_data_file(
+    content, media_type = simulation_data_controller.read_simulation_data_file(
         job_id=payload.job_id,
         relative_path=payload.relative_path,
         session=payload.session,
     )
-    return Response(content=content, media_type="text/plain")
+    return Response(content=content, media_type=media_type)

@@ -11,11 +11,15 @@ from fastapi import HTTPException
 from app.config import settings
 
 
-def _job_simulation_root(job_id: str) -> Path:
+def _job_root(job_id: str) -> Path:
     clean_id = str(job_id).strip().strip("/\\")
     if not clean_id or ".." in clean_id or "/" in clean_id or "\\" in clean_id:
         raise HTTPException(status_code=400, detail="Invalid job_id")
-    return Path(settings.JOBS_DIR) / clean_id / "results" / "simulation_data"
+    return Path(settings.JOBS_DIR) / clean_id
+
+
+def _job_simulation_root(job_id: str) -> Path:
+    return _job_root(job_id) / "results" / "simulation_data"
 
 
 def _session_candidates(root: Path) -> list[Path]:
@@ -129,9 +133,32 @@ def _normalise_relative_path(value: str) -> Path:
         raise HTTPException(status_code=400, detail="relative_path must be relative")
     if ".." in normalized.parts:
         raise HTTPException(status_code=400, detail="Invalid relative_path")
-    if normalized.suffix.lower() != ".csv":
-        raise HTTPException(status_code=400, detail="Only .csv files are supported")
+    if not normalized.parts or str(normalized) in {"", "."}:
+        raise HTTPException(status_code=400, detail="Invalid relative_path")
     return normalized
+
+
+def _resolve_target_within(base: Path, rel: Path) -> Path | None:
+    base_resolved = base.resolve()
+    target = (base_resolved / rel).resolve()
+    if not str(target).startswith(str(base_resolved) + os.sep) and target != base_resolved:
+        return None
+    if not target.exists() or not target.is_file():
+        return None
+    return target
+
+
+def _media_type_for(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        return "text/csv"
+    if suffix == ".json":
+        return "application/json"
+    if suffix in {".yaml", ".yml"}:
+        return "text/yaml"
+    if suffix in {".txt", ".log", ".md", ".xml", ".ini", ".cfg", ".conf"}:
+        return "text/plain"
+    return "application/octet-stream"
 
 
 def index_simulation_data(job_id: str, session: str | None = "latest") -> dict:
@@ -151,18 +178,32 @@ def index_simulation_data(job_id: str, session: str | None = "latest") -> dict:
     }
 
 
-def read_simulation_data_file(job_id: str, relative_path: str, session: str | None = "latest") -> str:
+def read_simulation_data_file(job_id: str, relative_path: str, session: str | None = "latest") -> tuple[bytes, str]:
     rel = _normalise_relative_path(relative_path)
-    root = _job_simulation_root(job_id)
-    _, session_path = _select_session(root, session)
-    target = (session_path / rel).resolve()
-    session_resolved = session_path.resolve()
-    if not str(target).startswith(str(session_resolved) + os.sep) and target != session_resolved:
-        raise HTTPException(status_code=400, detail="Invalid relative_path")
-    if not target.exists() or not target.is_file():
+    job_root = _job_root(job_id)
+    if not job_root.exists() or not job_root.is_dir():
+        raise HTTPException(status_code=404, detail="No job data found for this job")
+
+    session_path: Path | None = None
+    sim_root = job_root / "results" / "simulation_data"
+    if sim_root.exists() and sim_root.is_dir():
+        try:
+            _, session_path = _select_session(sim_root, session)
+        except HTTPException as exc:
+            # Keep compatibility for regular session reads while allowing
+            # non-simulation artifacts (e.g., bundle files) from job root.
+            if not (exc.status_code == 404 and (not session or session == "latest")):
+                raise
+
+    target = None
+    if session_path is not None:
+        target = _resolve_target_within(session_path, rel)
+    if target is None:
+        target = _resolve_target_within(job_root, rel)
+    if target is None:
         raise HTTPException(status_code=404, detail="Simulation data file not found")
 
     try:
-        return target.read_text(encoding="utf-8")
+        return target.read_bytes(), _media_type_for(target)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Failed to read file: {exc}")
