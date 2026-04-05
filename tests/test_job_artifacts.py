@@ -119,6 +119,21 @@ def test_get_file_logs_prefers_non_empty_candidate_when_canonical_is_empty(monke
     assert "run-id-live-log" in payload
 
 
+def test_get_file_logs_uses_runtime_log_when_known_candidates_are_empty(monkeypatch, tmp_path):
+    job_id = "job-runtime-fallback"
+    jobs_root = _use_temp_job_dir(monkeypatch, tmp_path, job_id, JobStatus.RUNNING.value)
+    logs_dir = jobs_root / job_id / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (jobs_root / job_id / "job_info.json").write_text(json.dumps({"run_id": "run-123"}))
+    (logs_dir / f"{job_id}.log").write_text("", encoding="utf-8")
+    (logs_dir / "run-123.log").write_text("", encoding="utf-8")
+    runtime_log = logs_dir / "runtime.log"
+    runtime_log.write_text("runtime-live-log\n", encoding="utf-8")
+
+    payload = "".join(job_service.get_file_logs(job_id))
+    assert "runtime-live-log" in payload
+
+
 def test_get_logs_resolves_mlflow_run_id(monkeypatch, tmp_path):
     job_id = "job-mlflow-log"
     jobs_root = _use_temp_job_dir(monkeypatch, tmp_path, job_id, JobStatus.FINISHED.value)

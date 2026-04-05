@@ -198,13 +198,6 @@ def _resolve_log_path(job_id: str) -> Optional[str]:
         if os.path.isfile(candidate_path):
             existing_candidates.append(Path(candidate_path))
 
-    if existing_candidates:
-        # Prefer a non-empty log when the canonical file exists but is still empty.
-        non_empty = [entry for entry in existing_candidates if entry.stat().st_size > 0]
-        if non_empty:
-            return str(max(non_empty, key=lambda entry: entry.stat().st_mtime))
-        return str(existing_candidates[0])
-
     log_candidates = [
         entry for entry in Path(logs_dir).glob("*.log")
         if entry.is_file()
@@ -212,10 +205,21 @@ def _resolve_log_path(job_id: str) -> Optional[str]:
     if not log_candidates:
         return None
 
-    non_empty_fallback = [entry for entry in log_candidates if entry.stat().st_size > 0]
-    if non_empty_fallback:
-        newest_non_empty = max(non_empty_fallback, key=lambda entry: entry.stat().st_mtime)
+    if existing_candidates:
+        # Prefer known candidate names if any of them already has content.
+        non_empty_known = [entry for entry in existing_candidates if entry.stat().st_size > 0]
+        if non_empty_known:
+            return str(max(non_empty_known, key=lambda entry: entry.stat().st_mtime))
+
+    # Otherwise pick the most recent non-empty log across every .log file
+    # (e.g. runtime.log while canonical <job_id>.log is still empty).
+    non_empty_any = [entry for entry in log_candidates if entry.stat().st_size > 0]
+    if non_empty_any:
+        newest_non_empty = max(non_empty_any, key=lambda entry: entry.stat().st_mtime)
         return str(newest_non_empty)
+
+    if existing_candidates:
+        return str(existing_candidates[0])
 
     newest = max(log_candidates, key=lambda entry: entry.stat().st_mtime)
     return str(newest)
