@@ -1232,6 +1232,37 @@ def test_ops_cleanup_jobs_prunes_registry():
     assert not (Path(settings.QUEUE_DIR) / f"{remove_id}.json").exists()
 
 
+def test_ops_cleanup_jobs_removes_job_dirs_and_orphans():
+    keep_id = "keep-dir-job"
+    removed_id = "remove-dir-job"
+    orphan_id = "orphan-dir-job"
+
+    for job_id in (keep_id, removed_id):
+        job_service.jobs[job_id] = {
+            "job_id": job_id,
+            "target_host": "worker-a",
+            "status": JobStatus.QUEUED.value,
+        }
+        job_utils.save_job(job_id, job_service.jobs[job_id])
+
+    keep_dir = Path(settings.JOBS_DIR) / keep_id
+    remove_dir = Path(settings.JOBS_DIR) / removed_id
+    orphan_dir = Path(settings.JOBS_DIR) / orphan_id
+    for directory in (keep_dir, remove_dir, orphan_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "status.json").write_text(json.dumps({"status": JobStatus.QUEUED.value}))
+
+    resp = job_service.ops_cleanup_jobs(keep=[keep_id])
+
+    assert removed_id in resp["removed"]
+    assert removed_id in resp["removed_dirs"]
+    assert orphan_id in resp["orphan_removed"]
+    assert keep_id not in resp["removed"]
+    assert keep_dir.exists()
+    assert not remove_dir.exists()
+    assert not orphan_dir.exists()
+
+
 def test_delete_job_removes_artifacts():
     job_id = "job-delete"
     job_service.jobs[job_id] = {
@@ -1254,3 +1285,20 @@ def test_delete_job_removes_artifacts():
     track = json.loads(Path(settings.JOB_TRACK_FILE).read_text())
     assert job_id not in track
     assert job_id not in job_service.jobs
+
+
+def test_delete_job_returns_500_when_filesystem_removal_fails(monkeypatch):
+    job_id = "job-delete-fails"
+    job_service.jobs[job_id] = {
+        "job_id": job_id,
+        "target_host": "remote",
+        "status": JobStatus.QUEUED.value,
+    }
+    job_utils.save_job(job_id, job_service.jobs[job_id])
+
+    monkeypatch.setattr(job_utils, "delete_job_by_id", lambda _job_id: False)
+
+    with pytest.raises(HTTPException) as exc:
+        job_service.delete_job(job_id)
+    assert exc.value.status_code == 500
+    assert job_id in job_service.jobs

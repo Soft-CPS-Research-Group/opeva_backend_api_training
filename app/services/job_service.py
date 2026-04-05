@@ -1,5 +1,5 @@
 # app/services/job_service.py
-import os, re, json, yaml, time, logging
+import os, re, json, yaml, time, logging, shutil
 from uuid import uuid4
 from typing import Any, Generator, Optional
 from pathlib import Path
@@ -1452,6 +1452,7 @@ def delete_job(job_id: str):
     ok = job_utils.delete_job_by_id(job_id)
     if not ok:
         raise HTTPException(500, "Failed to delete job")
+    job_utils.remove_from_queue(job_id)
     jobs.pop(job_id, None)
     return {"message": f"Job {job_id} deleted successfully"}
 
@@ -1654,7 +1655,7 @@ def ops_cleanup_queue(force: bool = False) -> dict:
 
 
 def ops_cleanup_jobs(keep: list[str] | None = None) -> dict:
-    """Remove all job records except those in the keep list."""
+    """Remove job registry entries and clean corresponding/orphan job directories."""
     _refresh_jobs()
     keep_set = set(DEFAULT_JOB_CLEANUP_KEEP)
     if keep:
@@ -1662,15 +1663,69 @@ def ops_cleanup_jobs(keep: list[str] | None = None) -> dict:
 
     tracked = job_utils.load_jobs()
     removed = [job_id for job_id in tracked.keys() if job_id not in keep_set]
+    removed_dirs: list[str] = []
+    orphan_removed: list[str] = []
+    filesystem_errors: dict[str, str] = {}
+
     if removed:
+        for job_id in removed:
+            job_dir = Path(_job_dir(job_id))
+            if not job_dir.exists():
+                continue
+            try:
+                shutil.rmtree(job_dir)
+                removed_dirs.append(job_id)
+            except OSError as exc:
+                filesystem_errors[job_id] = str(exc)
         job_utils.prune_jobs(keep_set)
 
     for job_id in removed:
         job_utils.remove_from_queue(job_id)
+        jobs.pop(job_id, None)
+
+    # Remove orphan directories not present in tracked jobs and not explicitly kept.
+    tracked_after = set(job_utils.load_jobs().keys())
+    protected = tracked_after | keep_set
+    jobs_root = Path(settings.JOBS_DIR)
+    if jobs_root.exists():
+        for candidate in jobs_root.iterdir():
+            if not candidate.is_dir():
+                continue
+            job_id = candidate.name
+            if job_id in protected:
+                continue
+            # Avoid deleting unrelated directories accidentally.
+            looks_like_job_dir = any(
+                (candidate / marker).exists()
+                for marker in (
+                    "status.json",
+                    "job_info.json",
+                    "logs",
+                    "progress",
+                    "results",
+                    "bundle",
+                    "checkpoints",
+                    "config.resolved.yaml",
+                )
+            )
+            if not looks_like_job_dir:
+                continue
+            try:
+                shutil.rmtree(candidate)
+                orphan_removed.append(job_id)
+            except OSError as exc:
+                filesystem_errors[job_id] = str(exc)
 
     _refresh_jobs()
     kept = [job_id for job_id in jobs.keys() if job_id in keep_set]
-    return {"removed": removed, "kept": kept, "count": len(removed)}
+    return {
+        "removed": removed,
+        "removed_dirs": removed_dirs,
+        "orphan_removed": orphan_removed,
+        "filesystem_errors": filesystem_errors,
+        "kept": kept,
+        "count": len(removed),
+    }
 
 # ---------- hooks used by agent endpoints ----------
 def agent_next_job(worker_id: str):

@@ -133,17 +133,39 @@ def write_status_file(job_id: str, status: str, extra: dict | None = None):
 
 def delete_job_by_id(job_id: str) -> bool:
     job_path = os.path.join(settings.JOBS_DIR, job_id)
-    removed = False
+    removed_fs = False
     if os.path.exists(job_path):
-        shutil.rmtree(job_path)
-        removed = True
+        try:
+            shutil.rmtree(job_path)
+            removed_fs = True
+        except OSError:
+            # Best effort permission normalization for root-owned or restrictive files.
+            try:
+                for root, dirs, files in os.walk(job_path):
+                    for directory in dirs:
+                        try:
+                            os.chmod(os.path.join(root, directory), 0o777)
+                        except OSError:
+                            continue
+                    for file_name in files:
+                        try:
+                            os.chmod(os.path.join(root, file_name), 0o666)
+                        except OSError:
+                            continue
+                os.chmod(job_path, 0o777)
+                shutil.rmtree(job_path)
+                removed_fs = True
+            except OSError:
+                return False
+
+    removed_registry = False
     with _job_track_lock():
         jobs = _read_job_track_unlocked()
         if job_id in jobs:
             del jobs[job_id]
-            removed = True
+            removed_registry = True
         _write_job_track_unlocked(jobs)
-    return True
+    return removed_fs or removed_registry or (not os.path.exists(job_path))
 
 
 def prune_jobs(keep: set[str]) -> list[str]:
