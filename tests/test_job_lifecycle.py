@@ -1212,7 +1212,7 @@ def test_ops_cleanup_jobs_prunes_registry():
         job_service.jobs[job_id] = {
             "job_id": job_id,
             "target_host": "worker-a",
-            "status": JobStatus.QUEUED.value,
+            "status": JobStatus.QUEUED.value if job_id == keep_id else JobStatus.FINISHED.value,
         }
         job_utils.save_job(job_id, job_service.jobs[job_id])
 
@@ -1241,7 +1241,7 @@ def test_ops_cleanup_jobs_removes_job_dirs_and_orphans():
         job_service.jobs[job_id] = {
             "job_id": job_id,
             "target_host": "worker-a",
-            "status": JobStatus.QUEUED.value,
+            "status": JobStatus.QUEUED.value if job_id == keep_id else JobStatus.FINISHED.value,
         }
         job_utils.save_job(job_id, job_service.jobs[job_id])
 
@@ -1261,6 +1261,38 @@ def test_ops_cleanup_jobs_removes_job_dirs_and_orphans():
     assert keep_dir.exists()
     assert not remove_dir.exists()
     assert not orphan_dir.exists()
+
+
+def test_ops_cleanup_jobs_keeps_active_jobs():
+    active_id = "active-running-job"
+    finished_id = "finished-job"
+
+    job_service.jobs[active_id] = {
+        "job_id": active_id,
+        "target_host": "worker-a",
+        "status": JobStatus.RUNNING.value,
+    }
+    job_service.jobs[finished_id] = {
+        "job_id": finished_id,
+        "target_host": "worker-a",
+        "status": JobStatus.FINISHED.value,
+    }
+    job_utils.save_job(active_id, job_service.jobs[active_id])
+    job_utils.save_job(finished_id, job_service.jobs[finished_id])
+
+    active_dir = Path(settings.JOBS_DIR) / active_id
+    finished_dir = Path(settings.JOBS_DIR) / finished_id
+    for directory, status in ((active_dir, JobStatus.RUNNING.value), (finished_dir, JobStatus.FINISHED.value)):
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "status.json").write_text(json.dumps({"status": status}))
+
+    resp = job_service.ops_cleanup_jobs()
+
+    assert active_id in resp["active_kept"]
+    assert active_id not in resp["removed"]
+    assert finished_id in resp["removed"]
+    assert active_dir.exists()
+    assert not finished_dir.exists()
 
 
 def test_delete_job_removes_artifacts():

@@ -1662,6 +1662,15 @@ def ops_cleanup_jobs(keep: list[str] | None = None) -> dict:
         keep_set.update(keep)
 
     tracked = job_utils.load_jobs()
+    # Never remove active jobs by default; cleanup is intended for stale/terminal data.
+    active_kept: set[str] = set()
+    for job_id, tracked_meta in tracked.items():
+        in_memory_meta = jobs.get(job_id) or {}
+        status_now = _read_status_file(job_id) or in_memory_meta.get("status") or tracked_meta.get("status")
+        if status_now in ACTIVE_JOB_STATUSES:
+            active_kept.add(job_id)
+    keep_set.update(active_kept)
+
     removed = [job_id for job_id in tracked.keys() if job_id not in keep_set]
     removed_dirs: list[str] = []
     orphan_removed: list[str] = []
@@ -1694,6 +1703,10 @@ def ops_cleanup_jobs(keep: list[str] | None = None) -> dict:
             job_id = candidate.name
             if job_id in protected:
                 continue
+            candidate_status = _read_status_file(job_id)
+            if candidate_status in ACTIVE_JOB_STATUSES:
+                keep_set.add(job_id)
+                continue
             # Avoid deleting unrelated directories accidentally.
             looks_like_job_dir = any(
                 (candidate / marker).exists()
@@ -1724,6 +1737,7 @@ def ops_cleanup_jobs(keep: list[str] | None = None) -> dict:
         "orphan_removed": orphan_removed,
         "filesystem_errors": filesystem_errors,
         "kept": kept,
+        "active_kept": sorted(active_kept),
         "count": len(removed),
     }
 
