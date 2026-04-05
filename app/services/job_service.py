@@ -188,6 +188,7 @@ def _resolve_log_path(job_id: str) -> Optional[str]:
         if isinstance(value, str) and value.strip():
             candidate_names.append(f"{value.strip()}.log")
 
+    existing_candidates: list[Path] = []
     seen: set[str] = set()
     for candidate_name in candidate_names:
         if candidate_name in seen:
@@ -195,16 +196,29 @@ def _resolve_log_path(job_id: str) -> Optional[str]:
         seen.add(candidate_name)
         candidate_path = os.path.join(logs_dir, candidate_name)
         if os.path.isfile(candidate_path):
-            return candidate_path
+            existing_candidates.append(Path(candidate_path))
+
+    if existing_candidates:
+        # Prefer a non-empty log when the canonical file exists but is still empty.
+        non_empty = [entry for entry in existing_candidates if entry.stat().st_size > 0]
+        if non_empty:
+            return str(max(non_empty, key=lambda entry: entry.stat().st_mtime))
+        return str(existing_candidates[0])
 
     log_candidates = [
         entry for entry in Path(logs_dir).glob("*.log")
         if entry.is_file()
     ]
-    if log_candidates:
-        newest = max(log_candidates, key=lambda entry: entry.stat().st_mtime)
-        return str(newest)
-    return None
+    if not log_candidates:
+        return None
+
+    non_empty_fallback = [entry for entry in log_candidates if entry.stat().st_size > 0]
+    if non_empty_fallback:
+        newest_non_empty = max(non_empty_fallback, key=lambda entry: entry.stat().st_mtime)
+        return str(newest_non_empty)
+
+    newest = max(log_candidates, key=lambda entry: entry.stat().st_mtime)
+    return str(newest)
 
 def _container_name(job_id: str, job_name: str) -> str:
     safe_name = _slug(job_name)[:40]
