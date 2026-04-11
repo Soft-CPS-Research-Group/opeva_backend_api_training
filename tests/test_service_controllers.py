@@ -90,11 +90,14 @@ def test_dataset_service_create_calls_file_utils(monkeypatch):
 
     def fake_create(name, site_id, cfg, description, period, from_ts, until_ts):
         called["args"] = (name, site_id, cfg, description, period, from_ts, until_ts)
+        return {"warnings": ["w1"], "validation": {"static": {"ok": True}}}
 
     monkeypatch.setattr(file_utils, "create_dataset_dir", fake_create)
 
     resp = dataset_service.create_dataset("ds1", "site", {"x": 1}, "desc", 30, "2020-01-01", "2020-01-02")
     assert resp["message"] == "Dataset created"
+    assert resp["warnings"] == ["w1"]
+    assert resp["validation"]["static"]["ok"] is True
     assert called["args"][0] == "ds1"
 
 
@@ -137,6 +140,16 @@ def test_dataset_controller_passthrough(monkeypatch):
     )
     upload_resp = dataset_controller.upload_dataset(object(), "a.zip", "imported")
     assert upload_resp["name"] == "imported"
+
+
+def test_dataset_sites_passthrough(monkeypatch):
+    monkeypatch.setattr(file_utils, "list_dataset_sites", lambda: [{"site_id": "s1", "buildings": ["B1"]}])
+    service_payload = dataset_service.list_dataset_sites()
+    assert service_payload["sites"][0]["site_id"] == "s1"
+
+    monkeypatch.setattr(dataset_service, "list_dataset_sites", lambda: {"sites": [{"site_id": "s2", "buildings": []}]})
+    controller_payload = dataset_controller.list_dataset_sites()
+    assert controller_payload["sites"][0]["site_id"] == "s2"
 
 
 def test_mongo_service_lists_energy_communities(monkeypatch):

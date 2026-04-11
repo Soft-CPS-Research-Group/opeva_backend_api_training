@@ -10,6 +10,10 @@ def create_dataset(name: str, site_id: str, config: dict, description: str = "",
 def list_dates_available_per_collection(site_id: str):
     return dataset_service.list_dates_available_per_collection(site_id)
 
+
+def list_dataset_sites():
+    return dataset_service.list_dataset_sites()
+
 def list_datasets():
     return dataset_service.list_datasets()
 

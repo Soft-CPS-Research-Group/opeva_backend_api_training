@@ -16,6 +16,12 @@ async def create_dataset(
 ):
     return dataset_controller.create_dataset(name, site_id, citylearn_configs, description, period, from_ts, until_ts)
 
+
+@router.get("/dataset/sites")
+async def list_dataset_sites():
+    return dataset_controller.list_dataset_sites()
+
+
 @router.get("/dataset/dates-available/{site_id}")
 async def list_dates_available_per_collection(site_id : str):
     return dataset_controller.list_dates_available_per_collection(site_id)

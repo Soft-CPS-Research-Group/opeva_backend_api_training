@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -239,6 +240,131 @@ def test_logs_stream_returns_data(deploy_client: TestClient, monkeypatch):
     assert response.status_code == 200
     assert "line-1" in response.text
     assert "line-2" in response.text
+
+
+def test_logs_history_chunk_supports_window_search_and_cursor(deploy_client: TestClient, monkeypatch):
+    from app.services import deploy_service
+
+    observed: dict = {}
+    raw_lines = [
+        "2026-04-10T10:00:00.000000000Z alpha boot",
+        "2026-04-10T10:10:00.000000000Z beta health",
+        "line-without-timestamp marker",
+        "2026-04-10T10:20:00.000000000Z gamma done",
+        "2026-04-10T10:30:00.000000000Z search target",
+    ]
+
+    class _Container:
+        def logs(self, **kwargs):
+            observed.update(kwargs)
+            return ("\n".join(raw_lines) + "\n").encode("utf-8")
+
+    class _Containers:
+        @staticmethod
+        def get(name: str):
+            assert name == "inference_hq"
+            return _Container()
+
+    class _DockerClient:
+        def __init__(self, *args, **kwargs):
+            self.containers = _Containers()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(deploy_service.docker, "DockerClient", _DockerClient)
+
+    params = {
+        "since_ts": "2026-04-10T09:00:00Z",
+        "until_ts": "2026-04-10T11:00:00Z",
+        "limit_lines": 2,
+    }
+    first = deploy_client.get("/deploy/inferences/hq/logs/history/chunk", params=params)
+    assert first.status_code == 200, first.text
+    first_payload = first.json()
+
+    assert observed["timestamps"] is True
+    assert observed["stream"] is False
+    assert observed["follow"] is False
+    assert observed["tail"] == "all"
+    assert isinstance(observed["since"], datetime)
+    assert observed["since"].tzinfo == timezone.utc
+    assert isinstance(observed["until"], datetime)
+    assert observed["until"].tzinfo == timezone.utc
+
+    assert first_payload["available"] is True
+    assert [line["text"] for line in first_payload["lines"]] == ["gamma done", "search target"]
+    assert first_payload["has_more_before"] is True
+    assert first_payload["has_more_after"] is False
+    assert first_payload["next_cursor"]
+    assert first_payload["prev_cursor"] is None
+
+    older = deploy_client.get(
+        "/deploy/inferences/hq/logs/history/chunk",
+        params={**params, "cursor": first_payload["next_cursor"]},
+    )
+    assert older.status_code == 200, older.text
+    older_payload = older.json()
+    assert [line["text"] for line in older_payload["lines"]] == ["beta health", "line-without-timestamp marker"]
+    assert older_payload["lines"][1]["ts"] is None
+    assert older_payload["has_more_before"] is True
+    assert older_payload["has_more_after"] is True
+    assert older_payload["prev_cursor"]
+
+    newer = deploy_client.get(
+        "/deploy/inferences/hq/logs/history/chunk",
+        params={**params, "cursor": older_payload["prev_cursor"]},
+    )
+    assert newer.status_code == 200, newer.text
+    newer_payload = newer.json()
+    assert [line["text"] for line in newer_payload["lines"]] == ["gamma done", "search target"]
+
+    filtered = deploy_client.get(
+        "/deploy/inferences/hq/logs/history/chunk",
+        params={**params, "search": "target"},
+    )
+    assert filtered.status_code == 200, filtered.text
+    filtered_payload = filtered.json()
+    assert len(filtered_payload["lines"]) == 1
+    assert filtered_payload["lines"][0]["text"] == "search target"
+    assert filtered_payload["lines"][0]["source"] == "docker:inference_hq"
+
+
+def test_logs_history_chunk_handles_missing_container_without_500(deploy_client: TestClient, monkeypatch):
+    from app.services import deploy_service
+
+    class _Containers:
+        @staticmethod
+        def get(_name: str):
+            raise deploy_service.docker.errors.NotFound("missing")
+
+    class _DockerClient:
+        def __init__(self, *args, **kwargs):
+            self.containers = _Containers()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(deploy_service.docker, "DockerClient", _DockerClient)
+
+    response = deploy_client.get(
+        "/deploy/inferences/hq/logs/history/chunk",
+        params={"since_ts": "2026-04-10T09:00:00Z"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["lines"] == []
+    assert "not found" in payload["message"].lower()
+
+
+def test_logs_history_chunk_requires_utc_timestamps(deploy_client: TestClient):
+    response = deploy_client.get(
+        "/deploy/inferences/hq/logs/history/chunk",
+        params={"since_ts": "2026-04-10T10:00:00+01:00"},
+    )
+    assert response.status_code == 400
+    assert "utc" in response.json()["detail"].lower()
 
 
 def test_bundle_files_and_content(deploy_client: TestClient):

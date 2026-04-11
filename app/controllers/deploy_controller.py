@@ -39,3 +39,22 @@ def delete_bundle(bundle_id: str) -> dict:
 
 def stream_logs(target_id: str, tail: int = 200):
     return deploy_service.stream_inference_logs(target_id, tail)
+
+
+def logs_history_chunk(
+    target_id: str,
+    *,
+    since_ts: str,
+    until_ts: str | None = None,
+    cursor: str | None = None,
+    limit_lines: int = 500,
+    search: str | None = None,
+) -> dict:
+    return deploy_service.fetch_inference_logs_history_chunk(
+        target_id,
+        since_ts=since_ts,
+        until_ts=until_ts,
+        cursor=cursor,
+        limit_lines=limit_lines,
+        search=search,
+    )

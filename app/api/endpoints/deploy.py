@@ -33,6 +33,25 @@ def stream_logs(target_id: str, tail: int = Query(default=200, ge=0, le=5000)):
     )
 
 
+@router.get("/deploy/inferences/{target_id}/logs/history/chunk")
+def logs_history_chunk(
+    target_id: str,
+    since_ts: str = Query(..., min_length=1),
+    until_ts: str | None = Query(default=None),
+    cursor: str | None = Query(default=None),
+    limit_lines: int = Query(default=500, ge=1, le=2000),
+    search: str | None = Query(default=None),
+):
+    return deploy_controller.logs_history_chunk(
+        target_id,
+        since_ts=since_ts,
+        until_ts=until_ts,
+        cursor=cursor,
+        limit_lines=limit_lines,
+        search=search,
+    )
+
+
 @router.get("/deploy/bundles")
 def list_bundles():
     return deploy_controller.list_bundles()

@@ -6,9 +6,10 @@ import os
 import re
 import shutil
 import tempfile
+import base64
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Generator, Iterable
 
@@ -572,3 +573,246 @@ def stream_inference_logs(target_id: str, tail: int = 200) -> Generator[str, Non
         yield f"\n[deploy] log stream interrupted: {exc}\n"
     finally:
         client.close()
+
+
+_DOCKER_LOG_TIMESTAMP_RE = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})T"
+    r"(?P<time>\d{2}:\d{2}:\d{2})"
+    r"(?:\.(?P<fraction>\d{1,9}))?"
+    r"(?P<tz>Z|[+-]\d{2}:\d{2})$"
+)
+
+
+def _format_utc_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_utc_query_timestamp(raw: str, field_name: str) -> datetime:
+    value = str(raw or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail=f"Missing required query param '{field_name}'")
+
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid timestamp '{field_name}'. Expected ISO-8601 UTC.",
+        ) from exc
+
+    if parsed.tzinfo is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid timestamp '{field_name}'. Timezone is required (UTC).",
+        )
+
+    offset = parsed.utcoffset()
+    if offset != timedelta(0):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid timestamp '{field_name}'. Must be UTC (suffix Z or +00:00).",
+        )
+
+    return parsed.astimezone(timezone.utc)
+
+
+def _parse_docker_log_timestamp(raw: str) -> datetime | None:
+    candidate = str(raw or "").strip()
+    if not candidate:
+        return None
+
+    match = _DOCKER_LOG_TIMESTAMP_RE.match(candidate)
+    if not match:
+        return None
+
+    fraction = (match.group("fraction") or "")[:6].ljust(6, "0")
+    tz_raw = match.group("tz")
+    tz = "+00:00" if tz_raw == "Z" else tz_raw
+    payload = f"{match.group('date')}T{match.group('time')}"
+    if fraction:
+        payload = f"{payload}.{fraction}"
+    payload = f"{payload}{tz}"
+
+    try:
+        parsed = datetime.fromisoformat(payload)
+    except ValueError:
+        return None
+
+    return parsed.astimezone(timezone.utc)
+
+
+def _encode_logs_history_cursor(offset: int) -> str:
+    payload = json.dumps({"offset": max(0, int(offset))}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def _decode_logs_history_cursor(cursor: str) -> int:
+    value = str(cursor or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+
+    try:
+        raw = base64.urlsafe_b64decode(value.encode("ascii"))
+        data = json.loads(raw.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+
+    offset = data.get("offset")
+    if not isinstance(offset, int):
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    return max(0, offset)
+
+
+def _history_response(
+    *,
+    target: InferenceTarget,
+    since_dt: datetime,
+    until_dt: datetime,
+    lines: list[dict] | None = None,
+    next_cursor: str | None = None,
+    prev_cursor: str | None = None,
+    has_more_before: bool = False,
+    has_more_after: bool = False,
+    available: bool = True,
+    message: str | None = None,
+) -> dict:
+    return {
+        "target_id": target.id,
+        "since_ts": _format_utc_iso(since_dt),
+        "until_ts": _format_utc_iso(until_dt),
+        "lines": lines or [],
+        "next_cursor": next_cursor,
+        "prev_cursor": prev_cursor,
+        "has_more_before": has_more_before,
+        "has_more_after": has_more_after,
+        "available": available,
+        "message": message,
+    }
+
+
+def fetch_inference_logs_history_chunk(
+    target_id: str,
+    *,
+    since_ts: str,
+    until_ts: str | None = None,
+    cursor: str | None = None,
+    limit_lines: int = 500,
+    search: str | None = None,
+) -> dict:
+    target = _get_target(target_id)
+    since_dt = _parse_utc_query_timestamp(since_ts, "since_ts")
+    until_dt = _parse_utc_query_timestamp(until_ts, "until_ts") if until_ts else datetime.now(timezone.utc)
+    if since_dt > until_dt:
+        raise HTTPException(status_code=400, detail="Invalid time window. since_ts must be <= until_ts")
+
+    safe_limit = max(1, min(2000, int(limit_lines)))
+    search_token = str(search or "").strip()
+    search_folded = search_token.casefold()
+    source = f"docker:{target.container_name}"
+
+    client = docker.DockerClient(base_url="unix://var/run/docker.sock")
+    try:
+        try:
+            container = client.containers.get(target.container_name)
+        except docker.errors.NotFound:
+            return _history_response(
+                target=target,
+                since_dt=since_dt,
+                until_dt=until_dt,
+                available=False,
+                message=f"Container '{target.container_name}' not found.",
+            )
+        except docker.errors.DockerException as exc:
+            return _history_response(
+                target=target,
+                since_dt=since_dt,
+                until_dt=until_dt,
+                available=False,
+                message=f"Docker daemon unavailable: {exc}",
+            )
+
+        try:
+            raw = container.logs(
+                stream=False,
+                follow=False,
+                stdout=True,
+                stderr=True,
+                timestamps=True,
+                since=since_dt,
+                until=until_dt,
+                tail="all",
+            )
+        except docker.errors.DockerException as exc:
+            return _history_response(
+                target=target,
+                since_dt=since_dt,
+                until_dt=until_dt,
+                available=False,
+                message=f"Could not read logs from Docker: {exc}",
+            )
+    finally:
+        client.close()
+
+    payload = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw or "")
+    entries: list[dict] = []
+    for raw_line in payload.splitlines():
+        ts_value: str | None = None
+        text = raw_line
+
+        if raw_line:
+            timestamp_candidate, separator, remainder = raw_line.partition(" ")
+            parsed_ts = _parse_docker_log_timestamp(timestamp_candidate) if separator else None
+            if parsed_ts is not None:
+                ts_value = _format_utc_iso(parsed_ts)
+                text = remainder
+
+        if search_folded and search_folded not in text.casefold():
+            continue
+
+        entries.append({"ts": ts_value, "text": text, "source": source})
+
+    if not entries:
+        empty_message = (
+            f"No log lines matched '{search_token}' in this window."
+            if search_token
+            else "No logs found in this window (they may be outside retention)."
+        )
+        return _history_response(
+            target=target,
+            since_dt=since_dt,
+            until_dt=until_dt,
+            available=True,
+            message=empty_message,
+        )
+
+    total = len(entries)
+    if cursor:
+        start = _decode_logs_history_cursor(cursor)
+    else:
+        start = max(total - safe_limit, 0)
+
+    if start >= total:
+        start = max(total - safe_limit, 0)
+
+    end = min(start + safe_limit, total)
+    page = entries[start:end]
+
+    has_more_before = start > 0
+    has_more_after = end < total
+
+    next_cursor = _encode_logs_history_cursor(max(start - safe_limit, 0)) if has_more_before else None
+    prev_cursor = _encode_logs_history_cursor(end) if has_more_after else None
+
+    return _history_response(
+        target=target,
+        since_dt=since_dt,
+        until_dt=until_dt,
+        lines=page,
+        next_cursor=next_cursor,
+        prev_cursor=prev_cursor,
+        has_more_before=has_more_before,
+        has_more_after=has_more_after,
+        available=True,
+        message=None,
+    )
