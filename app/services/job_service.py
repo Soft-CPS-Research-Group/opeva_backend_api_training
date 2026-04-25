@@ -180,6 +180,11 @@ def _resolve_log_path(job_id: str) -> Optional[str]:
     if not os.path.isdir(logs_dir):
         return None
 
+    canonical_log = Path(_log_path(job_id))
+    if canonical_log.is_file() and canonical_log.stat().st_size > 0:
+        # Canonical merged stream must win over run-id specific files.
+        return str(canonical_log)
+
     info = _read_job_info_payload(job_id)
     # Prefer the canonical merged stream written by workers into <job_id>.log.
     candidate_names: list[str] = [f"{job_id}.log"]
