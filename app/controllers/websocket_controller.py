@@ -47,7 +47,7 @@ async def _on_message(exchange_name: str, raw_data: str):
         try:
             await client.send_json(message)
         except Exception:
-            dead.append(client)  # ← regista clientes mortos
+            dead.append(client)  # regista clientes mortos
 
     for client in dead:
         clients.remove(client)  # limpa depois do loop
