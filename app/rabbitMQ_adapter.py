@@ -4,7 +4,7 @@ from aio_pika.abc import AbstractRobustQueue
 
 class RabbitMQAdapter:
     def __init__(self):
-        self.url = "amqp://softcps.dei.isep.ipp.pt:5672/"
+        self.url = "amqp://frontendapp:frontendappmq@softcps.dei.isep.ipp.pt:5672/"
         self._connection = None
         self._channel = None
         self._queues: dict[str, AbstractRobustQueue] = {}  # exchange_name -> queue
