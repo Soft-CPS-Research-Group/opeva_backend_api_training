@@ -224,6 +224,114 @@ def test_get_status_updates_on_exit(monkeypatch):
     assert status_data["exit_code"] == 5
 
 
+def test_deucalion_dispatch_limits_one_active_cpu_and_gpu():
+    settings.AVAILABLE_HOSTS = ["deucalion"]
+
+    cpu_one = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(
+                config={"experiment": {"name": "Deucalion", "run_name": "CPU1"}},
+                target_host="deucalion",
+                deucalion_options={"partition": "normal-x86"},
+            )
+        )
+    )
+    cpu_two = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(
+                config={"experiment": {"name": "Deucalion", "run_name": "CPU2"}},
+                target_host="deucalion",
+                deucalion_options={"partition": "normal-x86"},
+            )
+        )
+    )
+    gpu_one = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(
+                config={"experiment": {"name": "Deucalion", "run_name": "GPU1"}},
+                target_host="deucalion",
+                deucalion_options={"partition": "normal-a100-80", "gpus": 1},
+            )
+        )
+    )
+
+    first = job_service.agent_next_job("deucalion")
+    assert first is not None
+    assert first["job_id"] == cpu_one["job_id"]
+
+    second = job_service.agent_next_job("deucalion")
+    assert second is not None
+    assert second["job_id"] == gpu_one["job_id"]
+
+    third = job_service.agent_next_job("deucalion")
+    assert third is None
+
+    queued_cpu = Path(settings.QUEUE_DIR) / f"{cpu_two['job_id']}.json"
+    assert queued_cpu.exists()
+
+    hosts = job_service.get_hosts()
+    deucalion = hosts["hosts"]["deucalion"]
+    assert deucalion["info"]["max_active_jobs"] == 2
+    assert deucalion["info"]["max_active_jobs_by_profile"] == {"cpu": 1, "gpu": 1}
+    assert deucalion["info"]["active_job_count_by_profile"] == {"cpu": 1, "gpu": 1}
+    assert deucalion["info"]["active_job_ids_by_profile"]["cpu"] == [cpu_one["job_id"]]
+    assert deucalion["info"]["active_job_ids_by_profile"]["gpu"] == [gpu_one["job_id"]]
+
+
+def test_launch_writes_resolved_config_with_container_dataset_path():
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+    config_path = Path(settings.CONFIGS_DIR) / "legacy-dataset.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "metadata": {"experiment_name": "Dataset", "run_name": "Path"},
+                "simulator": {
+                    "dataset_name": "demo_dataset",
+                    "dataset_path": "./datasets/demo_dataset/schema.json",
+                },
+            }
+        )
+    )
+
+    result = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(config_path="legacy-dataset.yaml", target_host="worker-a")
+        )
+    )
+    job_id = result["job_id"]
+
+    resolved_path = Path(settings.JOBS_DIR) / job_id / "config.resolved.yaml"
+    assert resolved_path.exists()
+    resolved = yaml.safe_load(resolved_path.read_text())
+    assert resolved["simulator"]["dataset_path"] == "/data/datasets/demo_dataset/schema.json"
+
+    dispatched = job_service.agent_next_job("worker-a")
+    assert dispatched is not None
+    assert dispatched["config_path"] == f"jobs/{job_id}/config.resolved.yaml"
+    assert dispatched["source_config_path"] == "configs/legacy-dataset.yaml"
+    assert f"--config /data/jobs/{job_id}/config.resolved.yaml" in dispatched["command"]
+
+
+def test_launch_adds_container_dataset_path_when_missing():
+    settings.AVAILABLE_HOSTS = ["worker-a"]
+
+    result = asyncio.run(
+        job_service.launch_simulation(
+            JobLaunchRequest(
+                config={
+                    "metadata": {"experiment_name": "Dataset", "run_name": "MissingPath"},
+                    "simulator": {"dataset_name": "generated_dataset"},
+                },
+                target_host="worker-a",
+            )
+        )
+    )
+    job_id = result["job_id"]
+
+    resolved = yaml.safe_load((Path(settings.JOBS_DIR) / job_id / "config.resolved.yaml").read_text())
+    assert resolved["simulator"]["dataset_path"] == "/data/datasets/generated_dataset/schema.json"
+
+
 def test_get_status_remote_uses_file():
     job_id = "job-remote"
     job_service.jobs[job_id] = {

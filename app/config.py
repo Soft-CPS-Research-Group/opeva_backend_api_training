@@ -167,6 +167,8 @@ class Settings(BaseSettings):
     WORKER_STALE_GRACE_SECONDS: int = 120  # additional grace beyond heartbeat TTL
     JOB_STATUS_TTL: int = 300  # seconds before a job status is considered stale
     DEUCALION_DISPATCH_STATUS_TTL: int = 21600  # allow long Slurm pending windows before forced requeue
+    DEUCALION_MAX_ACTIVE_CPU_JOBS: int = 1
+    DEUCALION_MAX_ACTIVE_GPU_JOBS: int = 1
     MLFLOW_TRACKING_URI: str | None = None
     DEUCALION_MLFLOW_TRACKING_URI: str = "file:/data/mlflow/mlruns"
     MLFLOW_UI_BASE_URL: str | None = None

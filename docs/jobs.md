@@ -168,6 +168,16 @@ Workers should use the provided `image`, `command`, `container_name`, and
 `volumes` when running the container. The server assumes `/data` maps to the
 shared storage root so `/data/configs/...` is accessible.
 
+If the API needs to normalize a config before execution (for example converting
+`./datasets/<name>/schema.json` or host paths into container paths), the worker
+payload can point `config_path` at `jobs/<job_id>/config.resolved.yaml` and keep
+the original file in `source_config_path`. Workers should run the provided
+`command` as-is.
+
+Dataset paths in configs should resolve inside the job container. The stable
+form is `/data/datasets/<dataset_name>/schema.json` because the shared storage
+root is mounted at `/data`.
+
 ## Worker Responsibilities
 
 ### Startup
@@ -198,8 +208,11 @@ shared storage root so `/data/configs/...` is accessible.
    - Include `exit_code` and optional error details.
 
 ### Concurrency
-- The server does not enforce concurrency. Each worker decides how many jobs
-  it can run at once.
+- General workers decide how many jobs they can run at once.
+- Deucalion dispatch is server-limited by runtime profile: at most one active
+  CPU job and one active GPU job can be dispatched/taken at the same time.
+  Additional Deucalion jobs remain queued until the corresponding profile slot
+  is free.
 
 ### Idempotency
 - Status updates with the same state are accepted. Invalid transitions return
@@ -244,3 +257,6 @@ Include optional info in heartbeat payload:
 - active job count
 
 The API stores heartbeat info in the host snapshot returned by `/hosts`.
+For Deucalion, `/hosts` also exposes `max_active_jobs_by_profile`,
+`active_job_count_by_profile`, and `active_job_ids_by_profile` for the CPU/GPU
+dispatch slots enforced by the server.

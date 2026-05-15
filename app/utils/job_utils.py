@@ -2,6 +2,7 @@
 import os, json, shutil, time, tempfile
 import fcntl
 from contextlib import contextmanager
+from typing import Callable
 from app.config import settings
 
 @contextmanager
@@ -226,7 +227,7 @@ def _restore_stale_claims(ttl: int):
             continue
 
 
-def agent_pop_next_job(worker_id: str) -> dict | None:
+def agent_pop_next_job(worker_id: str, can_accept: Callable[[dict], bool] | None = None) -> dict | None:
     wdir = settings.QUEUE_DIR
     if not os.path.isdir(wdir):
         return None
@@ -267,6 +268,10 @@ def agent_pop_next_job(worker_id: str) -> dict | None:
             # Allow any worker to pick up the job when host is not required
             if preferred and preferred != worker_id and not require_host:
                 payload["preferred_host"] = preferred
+
+            if can_accept and not can_accept(payload):
+                os.replace(claim_path, path)
+                continue
 
             os.remove(claim_path)
             return payload

@@ -1,10 +1,11 @@
 # app/services/job_service.py
-import os, re, json, yaml, time, logging, shutil
+import os, re, json, yaml, time, logging, shutil, fcntl, copy
 from uuid import uuid4
 from typing import Any, Generator, Optional
 from pathlib import Path
 from datetime import datetime, timezone
 from collections import deque
+from contextlib import contextmanager
 from fastapi import HTTPException
 from urllib import request as urllib_request
 from urllib import parse as urllib_parse
@@ -83,6 +84,7 @@ _image_versions_cache: dict[str, dict] = {}
 _LOG_CHUNK_DEFAULT_TAIL_LINES = 200
 _LOG_CHUNK_DEFAULT_MAX_BYTES = 256 * 1024
 _LOG_CHUNK_MAX_BYTES_LIMIT = 2 * 1024 * 1024
+CONTAINER_DATA_ROOT = "/data"
 
 
 def _parse_timestamp(value) -> float | None:
@@ -144,6 +146,19 @@ def _job_exists(job_id: str) -> bool:
 def _slug(s: str) -> str:
     return re.sub(r'[^a-zA-Z0-9_.-]', '_', s)
 
+@contextmanager
+def _dispatch_lock(worker_id: str):
+    """Serialize queue dispatch per worker across API processes."""
+    lock_dir = settings.QUEUE_DIR or settings.VM_SHARED_DATA
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_path = os.path.join(lock_dir, f".dispatch.{_slug(worker_id)}.lock")
+    with open(lock_path, "a+") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
 def _job_dir(job_id: str) -> str:
     return os.path.join(settings.JOBS_DIR, job_id)
 
@@ -161,6 +176,9 @@ def _log_path(job_id: str) -> str:
 
 def _resolved_config_path(job_id: str) -> str:
     return os.path.join(_job_dir(job_id), "config.resolved.yaml")
+
+def _resolved_config_container_path(job_id: str) -> str:
+    return f"jobs/{job_id}/config.resolved.yaml"
 
 
 def _read_job_info_payload(job_id: str) -> dict:
@@ -410,6 +428,66 @@ def _force_status(job_id: str, status: str, extra: dict | None = None) -> None:
         jobs[job_id] = meta
 
 # ---------- API: launch ----------
+def _as_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, float) and value.is_integer():
+        parsed = int(value)
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = int(value.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _is_gpu_like_partition(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip().lower()
+    if not normalized:
+        return False
+    return "gpu" in normalized or "a100" in normalized or "h100" in normalized
+
+
+def _payload_indicates_gpu(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    for key in ("gpus", "gpu_count", "gpus_per_task", "slurm_gpus"):
+        if _as_positive_int(payload.get(key)) is not None:
+            return True
+    for key in ("partition", "slurm_partition"):
+        if _is_gpu_like_partition(payload.get(key)):
+            return True
+    return False
+
+
+def _deucalion_job_profile(job_id: str, meta: dict | None = None) -> str:
+    metadata = meta or jobs.get(job_id) or {}
+    info = _read_job_info_payload(job_id)
+    status_payload = _read_status_payload(job_id) or {}
+
+    candidates = [
+        metadata.get("deucalion_options") if isinstance(metadata, dict) else None,
+        metadata.get("details") if isinstance(metadata, dict) else None,
+        info.get("deucalion_options"),
+        info.get("details"),
+        status_payload.get("details"),
+    ]
+    return "gpu" if any(_payload_indicates_gpu(candidate) for candidate in candidates) else "cpu"
+
+
+def _deucalion_profile_limits() -> dict[str, int]:
+    return {
+        "cpu": max(0, int(settings.DEUCALION_MAX_ACTIVE_CPU_JOBS)),
+        "gpu": max(0, int(settings.DEUCALION_MAX_ACTIVE_GPU_JOBS)),
+    }
+
+
 def _host_active_count(host: str) -> int:
     total = 0
     for job in jobs.values():
@@ -431,6 +509,51 @@ def _active_job_ids_for_host(host: str) -> list[str]:
         active.append((job_id, updated))
     active.sort(key=lambda item: item[1], reverse=True)
     return [job_id for job_id, _ in active]
+
+
+def _deucalion_active_job_ids_by_profile() -> dict[str, list[str]]:
+    active: dict[str, list[tuple[str, float]]] = {"cpu": [], "gpu": []}
+    for job_id, meta in jobs.items():
+        host = meta.get("target_host") or meta.get("preferred_host")
+        if host != "deucalion":
+            continue
+        if meta.get("status") not in ACTIVE_JOB_STATUSES:
+            continue
+        profile = _deucalion_job_profile(job_id, meta)
+        updated = _ensure_float(meta.get("last_status_at")) or _ensure_float(meta.get("status_updated_at")) or 0.0
+        active.setdefault(profile, []).append((job_id, updated))
+
+    return {
+        profile: [job_id for job_id, _ in sorted(entries, key=lambda item: item[1], reverse=True)]
+        for profile, entries in active.items()
+    }
+
+
+def _deucalion_active_counts_by_profile() -> dict[str, int]:
+    active = _deucalion_active_job_ids_by_profile()
+    return {profile: len(job_ids) for profile, job_ids in active.items()}
+
+
+def _can_dispatch_to_deucalion(queue_payload: dict, active_counts: dict[str, int] | None = None) -> bool:
+    job_id = queue_payload.get("job_id")
+    if not isinstance(job_id, str) or not job_id:
+        return False
+    meta = jobs.get(job_id)
+    if not meta:
+        return False
+    profile = _deucalion_job_profile(job_id, meta)
+    limits = _deucalion_profile_limits()
+    counts = active_counts or _deucalion_active_counts_by_profile()
+    allowed = counts.get(profile, 0) < limits.get(profile, 0)
+    if not allowed:
+        _LOGGER.info(
+            "Deucalion %s dispatch slot full; keeping job %s queued (%s/%s)",
+            profile.upper(),
+            job_id,
+            counts.get(profile, 0),
+            limits.get(profile, 0),
+        )
+    return allowed
 
 
 def _preferred_host(requested: Optional[str]) -> Optional[str]:
@@ -530,6 +653,72 @@ def _validate_executor_agnostic_config(config: dict) -> None:
                 f"({joined}). Move execution options to run-simulation payload."
             ),
         )
+
+
+def _container_dataset_schema_path(dataset_name: str) -> str:
+    return f"{CONTAINER_DATA_ROOT}/datasets/{dataset_name}/schema.json"
+
+
+def _normalize_path_for_container(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+
+    normalized = raw.replace("\\", "/")
+    container_root = CONTAINER_DATA_ROOT.rstrip("/")
+    if normalized == container_root or normalized.startswith(f"{container_root}/"):
+        return raw
+
+    host_roots = [
+        (str(Path(settings.DATASETS_DIR).as_posix()).rstrip("/"), f"{CONTAINER_DATA_ROOT}/datasets"),
+        (str(Path(settings.VM_SHARED_DATA).as_posix()).rstrip("/"), CONTAINER_DATA_ROOT),
+    ]
+    for host_root, mapped_root in host_roots:
+        if not host_root:
+            continue
+        if normalized == host_root:
+            return mapped_root
+        if normalized.startswith(f"{host_root}/"):
+            return f"{mapped_root}/{normalized[len(host_root):].lstrip('/')}"
+
+    relative = normalized[2:] if normalized.startswith("./") else normalized
+    relative = relative.lstrip("/")
+    if relative == "datasets" or relative.startswith("datasets/"):
+        return f"{CONTAINER_DATA_ROOT}/{relative}"
+
+    return raw
+
+
+def _resolve_runtime_config(config: dict) -> tuple[dict, bool]:
+    resolved = copy.deepcopy(config)
+    changed = False
+
+    simulator = resolved.get("simulator")
+    if not isinstance(simulator, dict):
+        return resolved, changed
+
+    dataset_name = simulator.get("dataset_name")
+    dataset_name = dataset_name.strip() if isinstance(dataset_name, str) else ""
+    dataset_path = simulator.get("dataset_path")
+
+    if isinstance(dataset_path, str) and dataset_path.strip():
+        normalized_path = _normalize_path_for_container(dataset_path)
+        if normalized_path and normalized_path != dataset_path:
+            simulator["dataset_path"] = normalized_path
+            changed = True
+    elif dataset_name:
+        simulator["dataset_path"] = _container_dataset_schema_path(dataset_name)
+        changed = True
+
+    return resolved, changed
+
+
+def _write_resolved_config(job_id: str, config: dict) -> None:
+    os.makedirs(_job_dir(job_id), exist_ok=True)
+    with open(_resolved_config_path(job_id), "w", encoding="utf-8") as handle:
+        yaml.safe_dump(config, handle, sort_keys=False)
 
 
 def _normalize_image_repository(value: Optional[str]) -> str:
@@ -896,6 +1085,8 @@ def _host_status_snapshot() -> dict[str, dict]:
         merged_active_ids = active_ids_from_info or [job.get("job_id") for job in normalized_active_jobs]
         if not merged_active_ids:
             merged_active_ids = active_job_ids
+        if host == "deucalion":
+            merged_active_ids = active_job_ids
 
         normalized_info["active_job_id"] = raw_info.get("active_job_id") or current_job_id
         normalized_info["active_job_count"] = raw_info.get("active_job_count")
@@ -905,6 +1096,18 @@ def _host_status_snapshot() -> dict[str, dict]:
         normalized_info["last_terminal_status"] = raw_info.get("last_terminal_status")
         normalized_info["budget"] = raw_info.get("budget")
         normalized_info["budget_refreshed_at"] = raw_info.get("budget_refreshed_at")
+        if host == "deucalion":
+            profile_limits = _deucalion_profile_limits()
+            profile_active_ids = _deucalion_active_job_ids_by_profile()
+            profile_counts = {
+                profile: len(profile_active_ids.get(profile, []))
+                for profile in profile_limits.keys()
+            }
+            normalized_info["max_active_jobs"] = sum(profile_limits.values())
+            normalized_info["max_active_jobs_by_profile"] = profile_limits
+            normalized_info["active_job_count_by_profile"] = profile_counts
+            normalized_info["active_job_ids_by_profile"] = profile_active_ids
+            normalized_info["active_job_count"] = sum(profile_counts.values())
         if normalized_info["active_job_count"] is None:
             normalized_info["active_job_count"] = len(merged_active_ids)
         snapshot[host] = {
@@ -1071,8 +1274,9 @@ async def launch_simulation(request: JobLaunchRequest):
     if not isinstance(config, dict):
         raise HTTPException(400, "Invalid config format")
     _validate_executor_agnostic_config(config)
+    runtime_config, runtime_config_changed = _resolve_runtime_config(config)
 
-    experiment_name, run_name = _resolve_experiment_identity(config)
+    experiment_name, run_name = _resolve_experiment_identity(runtime_config)
     requested_job_name = (request.job_name or "").strip()
     job_name = requested_job_name or f"{experiment_name}-{run_name}"
     submitted_by = (request.submitted_by or "").strip() or None
@@ -1090,6 +1294,8 @@ async def launch_simulation(request: JobLaunchRequest):
         config_path = f"configs/{config_path}"
 
     os.makedirs(_log_dir(job_id), exist_ok=True)
+    if runtime_config_changed:
+        _write_resolved_config(job_id, runtime_config)
     meta = {
         "job_id": job_id,
         "job_name": job_name,
@@ -1766,9 +1972,22 @@ def ops_cleanup_jobs(keep: list[str] | None = None) -> dict:
 
 # ---------- hooks used by agent endpoints ----------
 def agent_next_job(worker_id: str):
+    with _dispatch_lock(worker_id):
+        return _agent_next_job_locked(worker_id)
+
+
+def _agent_next_job_locked(worker_id: str):
     _refresh_jobs()
     _mark_stale_jobs()
-    job_queue_entry = job_utils.agent_pop_next_job(worker_id)
+    deucalion_active_counts = _deucalion_active_counts_by_profile() if worker_id == "deucalion" else None
+    job_queue_entry = job_utils.agent_pop_next_job(
+        worker_id,
+        can_accept=(
+            (lambda payload: _can_dispatch_to_deucalion(payload, deucalion_active_counts))
+            if worker_id == "deucalion"
+            else None
+        ),
+    )
     if not job_queue_entry:
         _LOGGER.debug("Worker %s polled queue but no job was available", worker_id)
         return None
@@ -1800,13 +2019,19 @@ def agent_next_job(worker_id: str):
             _LOGGER.error("Missing config path for job %s; marked failed", job_id)
             return None
 
+    runtime_config_path = (
+        _resolved_config_container_path(job_id)
+        if os.path.exists(_resolved_config_path(job_id))
+        else config_path
+    )
     container_name = _container_name(job_id, job_name)
-    command = f"--config /data/{config_path} --job_id {job_id}"
+    command = f"--config {CONTAINER_DATA_ROOT}/{runtime_config_path} --job_id {job_id}"
 
     response = {
         "job_id": job_id,
         "job_name": job_name,
-        "config_path": config_path,
+        "config_path": runtime_config_path,
+        "source_config_path": config_path,
         "preferred_host": job_queue_entry.get("preferred_host"),
         "image": _normalize_job_image(meta.get("image")),
         "image_tag": meta.get("image_tag"),

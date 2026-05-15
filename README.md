@@ -306,9 +306,14 @@ Upload or create a YAML file under `configs/` or provide inline config in the re
 experiment:
   name: Demo
   run_name: Run1
-simulation:
+simulator:
+  dataset_name: living_lab_2025
+  dataset_path: /data/datasets/living_lab_2025/schema.json
   episodes: 10
 ```
+Dataset paths in job configs should use the container mount path (`/data/...`).
+Legacy paths like `./datasets/<name>/schema.json` are normalized into the
+per-job resolved config before dispatch.
 
 ### 2. Launch on any available worker (no host preference)
 ```bash
@@ -483,7 +488,9 @@ curl -X DELETE http://SERVER:8000/dataset/living_lab_2025
 curl http://SERVER:8000/dataset/dates-available/living_lab
 ```
 
-Datasets are stored under `/opt/opeva_shared_data/datasets/<name>/` with accompanying `schema.json` describing structure and description.
+Datasets are stored on the host under `/opt/opeva_shared_data/datasets/<name>/`
+and are visible inside job containers as `/data/datasets/<name>/`. Config files
+should point `simulator.dataset_path` at `/data/datasets/<name>/schema.json`.
 
 ---
 
@@ -526,6 +533,8 @@ All runtime settings live in `app/config.py` (`Settings` class). Key attributes:
 | `QUEUE_CLAIM_TTL` | `300` | Seconds before a claimed queue file is re-queued. |
 | `JOB_STATUS_TTL` | `300` | Seconds before a job status is considered stale. |
 | `WORKER_STALE_GRACE_SECONDS` | `120` | Extra grace beyond heartbeat TTL before marking jobs failed. |
+| `DEUCALION_MAX_ACTIVE_CPU_JOBS` | `1` | Maximum active Deucalion CPU jobs dispatched by the API. |
+| `DEUCALION_MAX_ACTIVE_GPU_JOBS` | `1` | Maximum active Deucalion GPU jobs dispatched by the API. |
 | `DEFAULT_JOB_IMAGE` | `calof/opeva_simulator:latest` | Container image to run on workers. |
 | `JOB_IMAGE_REPOSITORY` | `calof/opeva_simulator` | Docker image repository queried by `/job-images/versions`. |
 | `JOB_SIF_REPOSITORY` | `calof/opeva_simulator_sif` | SIF OCI artifact repository used to derive `deucalion_ready` tag readiness. |
