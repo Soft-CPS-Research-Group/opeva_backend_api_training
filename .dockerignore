@@ -1,0 +1,10 @@
+.git
+.github
+.idea
+.pytest_cache
+__pycache__
+*.pyc
+venv
+.venv
+tmp_debug
+out
